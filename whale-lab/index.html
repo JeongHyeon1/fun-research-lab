@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="고래와 돌고래 발성의 음향 특징과 반복 패턴을 브라우저에서 분석하는 실험 도구"
+    />
+    <title>고래 언어 연구소 | Whale Language Lab</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="#">
+        <span class="brand-mark">WL</span>
+        <span>고래·돌고래 언어 연구소</span>
+      </a>
+      <div class="status"><span></span> BIOACOUSTIC MODE</div>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div>
+          <p class="eyebrow">CETACEAN BIOACOUSTICS / 고래류 생물음향</p>
+          <h1>고래와 돌고래의<br /><em>목소리를 읽다.</em></h1>
+          <p class="hero-copy">
+            고래와 돌고래 음원의 주파수, 펄스, 반복 구조를 브라우저 안에서 분석합니다.
+            파일은 서버로 전송되지 않습니다.
+          </p>
+        </div>
+        <div class="scope-note">
+          <span>연구 범위</span>
+          <p>이 도구는 고래 언어 번역기가 아닙니다. 음향적 유사성을 분석하며 종이나 의미를 확정하지 않습니다.</p>
+        </div>
+      </section>
+
+      <section class="workspace">
+        <aside class="input-panel">
+          <div class="section-title">
+            <span>01</span>
+            <h2>고래류 소리 가져오기</h2>
+          </div>
+
+          <label id="dropZone" class="drop-zone" for="audioInput">
+            <input id="audioInput" type="file" accept="audio/*,.wav,.mp3,.ogg,.m4a,.flac" />
+            <span class="upload-icon">↥</span>
+            <strong>음원 놓기</strong>
+            <small>WAV · MP3 · OGG · M4A</small>
+          </label>
+
+          <div class="divider"><span>또는 합성 고래류 소리로 체험</span></div>
+
+          <div class="samples">
+            <button class="sample-button" type="button" data-sample="clicks">
+              <span class="sample-icon">•••</span>
+              <span><strong>향유고래형 클릭</strong><small>규칙적인 광대역 펄스 예시</small></span>
+              <span>↗</span>
+            </button>
+            <button class="sample-button" type="button" data-sample="song">
+              <span class="sample-icon">〰</span>
+              <span><strong>혹등고래형 노래</strong><small>저주파 변조음 예시</small></span>
+              <span>↗</span>
+            </button>
+            <button class="sample-button" type="button" data-sample="whistle">
+              <span class="sample-icon">∿</span>
+              <span><strong>범고래형 휘파람</strong><small>고주파 상승음 예시</small></span>
+              <span>↗</span>
+            </button>
+            <button class="sample-button" type="button" data-sample="dolphin">
+              <span class="sample-icon">⌁</span>
+              <span><strong>돌고래형 시그니처 휘슬</strong><small>휘파람과 클릭 혼합 예시</small></span>
+              <span>↗</span>
+            </button>
+          </div>
+        </aside>
+
+        <section class="analysis-panel">
+          <div id="emptyState" class="empty-state">
+            <div class="sonar">
+              <i></i><i></i><i></i>
+              <span class="whale-mark" aria-hidden="true">🐋</span>
+            </div>
+            <h2>어떤 고래류의 목소리인가요?</h2>
+            <p>고래·돌고래 수중 녹음을 올리거나 왼쪽의 합성 발성 예시를 실행하세요.</p>
+          </div>
+
+          <div id="results" class="results hidden">
+            <div class="track-header">
+              <div>
+                <p class="eyebrow">CETACEAN VOCALIZATION RECORDING</p>
+                <h2 id="trackName">signal.wav</h2>
+                <p id="trackMeta">—</p>
+              </div>
+              <button id="playButton" class="play-button" type="button">
+                <span id="playIcon">▶</span>
+                <span id="playLabel">재생</span>
+              </button>
+            </div>
+
+            <div class="visual-card">
+              <div class="visual-heading">
+                <span>WAVEFORM</span>
+                <span id="timeReadout">00:00.0 / 00:00.0</span>
+              </div>
+              <div class="canvas-wrap waveform-wrap">
+                <canvas id="waveformCanvas"></canvas>
+                <i id="playhead"></i>
+              </div>
+            </div>
+
+            <div class="visual-card">
+              <div class="visual-heading">
+                <span>SPECTROGRAM</span>
+                <span>FREQUENCY / TIME</span>
+              </div>
+              <div class="spectrogram-layout">
+                <div class="frequency-axis"><span>HIGH</span><span>MID</span><span>LOW</span></div>
+                <canvas id="spectrogramCanvas"></canvas>
+              </div>
+            </div>
+
+            <div class="section-title result-title">
+              <span>02</span>
+              <h2>음향 특징</h2>
+            </div>
+
+            <div class="metrics">
+              <article>
+                <span>지배 주파수</span>
+                <strong id="dominantFrequency">—</strong>
+                <small>DOMINANT FREQ.</small>
+              </article>
+              <article>
+                <span>스펙트럼 중심</span>
+                <strong id="spectralCentroid">—</strong>
+                <small>SPECTRAL CENTROID</small>
+              </article>
+              <article>
+                <span>감지된 발성</span>
+                <strong id="eventCount">—</strong>
+                <small>ACOUSTIC EVENTS</small>
+              </article>
+              <article>
+                <span>반복 속도</span>
+                <strong id="pulseRate">—</strong>
+                <small>EST. PULSE RATE</small>
+              </article>
+            </div>
+
+            <div class="interpretation">
+              <div class="section-title">
+                <span>03</span>
+                <h2>고래·돌고래 발성 패턴 해석</h2>
+              </div>
+              <div class="pattern-result">
+                <div id="patternGlyph" class="pattern-glyph">•••</div>
+                <div>
+                  <p>가장 가까운 음향 형태</p>
+                  <h3 id="patternName">—</h3>
+                  <p id="patternDescription" class="pattern-description">—</p>
+                </div>
+                <div class="confidence">
+                  <span>휴리스틱 적합도</span>
+                  <strong id="confidenceValue">—</strong>
+                  <div><i id="confidenceBar"></i></div>
+                </div>
+              </div>
+              <div id="eventTimeline" class="event-timeline"></div>
+              <p class="disclaimer">
+                결과는 신호 특징에 따른 탐색적 분류입니다. “향유고래형” 등의 표현은 종 식별 결과가 아닌
+                음향 형태의 예시이며, 생물학적 해석에는 전문가 검토와 원본 녹음의 메타데이터가 필요합니다.
+              </p>
+            </div>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <footer>
+      <span>CETACEAN LANGUAGE LAB / 고래류 생물음향 실험실</span>
+      <span>고래·돌고래 음원은 기기 안에서만 분석됩니다</span>
+    </footer>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

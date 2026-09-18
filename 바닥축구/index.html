@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="브라우저에서 즐기는 2인용 네온 풋살 게임"
+    />
+    <title>NEON FUTSAL x4</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">LOCAL MULTIPLAYER</p>
+          <h1>NEON FUTSAL <span>x4</span></h1>
+        </div>
+        <button id="soundButton" class="icon-button" type="button" aria-label="소리 켜기">
+          SOUND OFF
+        </button>
+      </header>
+
+      <section class="scoreboard" aria-label="경기 현황">
+        <div class="team team-blue">
+          <span class="team-dot"></span>
+          <strong>BLUE</strong>
+        </div>
+        <div class="score">
+          <strong id="blueScore">0</strong>
+          <span>:</span>
+          <strong id="redScore">0</strong>
+        </div>
+        <div class="team team-red">
+          <strong>RED</strong>
+          <span class="team-dot"></span>
+        </div>
+        <div id="timer" class="timer">02:00</div>
+      </section>
+
+      <section class="game-shell">
+        <canvas id="gameCanvas" width="1280" height="720" aria-label="풋살 게임"></canvas>
+
+        <div id="startOverlay" class="overlay">
+          <div class="overlay-card">
+            <p class="eyebrow">FUTSAL LAB // 01</p>
+            <h2>친구를 불러오세요.</h2>
+            <p class="lead">한 키보드로 붙는 빠르고 정신없는 네온 풋살.</p>
+
+            <div class="controls">
+              <div class="control-card blue-card">
+                <span>PLAYER 1</span>
+                <strong>W A S D</strong>
+                <small>이동 · SPACE 킥</small>
+              </div>
+              <div class="versus">VS</div>
+              <div class="control-card red-card">
+                <span>PLAYER 2</span>
+                <strong>↑ ← ↓ →</strong>
+                <small>이동 · ENTER 킥</small>
+              </div>
+            </div>
+
+            <button id="startButton" class="primary-button" type="button">
+              KICK OFF
+              <span>↗</span>
+            </button>
+          </div>
+        </div>
+
+        <div id="message" class="game-message" aria-live="polite"></div>
+      </section>
+
+      <footer>
+        <p><kbd>R</kbd> 재시작</p>
+        <p>먼저 5골 또는 제한시간 종료 시 승리</p>
+        <p>NEON FUTSAL // BUILD 01</p>
+      </footer>
+    </main>
+
+    <script src="./game.js"></script>
+  </body>
+</html>

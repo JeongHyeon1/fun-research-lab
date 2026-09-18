@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="브라우저에서 즐기고 탐구하는 작은 프로젝트 모음" />
+    <title>재밌는 연구소</title>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Inter:wght@500;700;900&family=Space+Mono:wght@400;700&display=swap");
+
+      :root {
+        color-scheme: dark;
+        --bg: #090b0d;
+        --panel: #111519;
+        --line: #2a3137;
+        --text: #f3f6f5;
+        --muted: #839097;
+        --acid: #d9ff43;
+        --aqua: #3ce7cf;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        min-width: 320px;
+        min-height: 100vh;
+        margin: 0;
+        background:
+          radial-gradient(circle at 12% 12%, rgba(217, 255, 67, 0.08), transparent 24rem),
+          radial-gradient(circle at 88% 78%, rgba(60, 231, 207, 0.08), transparent 28rem),
+          var(--bg);
+        color: var(--text);
+        font-family: Inter, sans-serif;
+      }
+
+      main {
+        width: min(1180px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: clamp(54px, 9vw, 120px) 0;
+      }
+
+      .eyebrow {
+        margin: 0 0 16px;
+        color: var(--muted);
+        font: 700 10px "Space Mono", monospace;
+        letter-spacing: 0.2em;
+      }
+
+      h1 {
+        max-width: 800px;
+        margin: 0;
+        font-size: clamp(46px, 8vw, 96px);
+        font-weight: 900;
+        letter-spacing: -0.075em;
+        line-height: 0.92;
+      }
+
+      .intro {
+        max-width: 540px;
+        margin: 25px 0 55px;
+        color: var(--muted);
+        font-size: 15px;
+        line-height: 1.75;
+      }
+
+      .projects {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+      }
+
+      .project {
+        position: relative;
+        display: flex;
+        min-height: 340px;
+        overflow: hidden;
+        flex-direction: column;
+        justify-content: flex-end;
+        border: 1px solid var(--line);
+        padding: clamp(25px, 4vw, 42px);
+        background: var(--panel);
+        color: var(--text);
+        text-decoration: none;
+        transition: 180ms ease;
+      }
+
+      .project::before {
+        position: absolute;
+        top: 40px;
+        right: 44px;
+        width: 100px;
+        height: 100px;
+        border: 1px solid currentColor;
+        border-radius: 50%;
+        opacity: 0.2;
+        content: "";
+      }
+
+      .project::after {
+        position: absolute;
+        top: 64px;
+        right: 68px;
+        width: 50px;
+        height: 50px;
+        border: 1px solid currentColor;
+        border-radius: 50%;
+        opacity: 0.35;
+        content: "";
+      }
+
+      .project:hover {
+        transform: translateY(-6px);
+        border-color: currentColor;
+        box-shadow: 0 22px 50px rgba(0, 0, 0, 0.35);
+      }
+
+      .game {
+        color: var(--acid);
+        background: linear-gradient(145deg, #171c10, #0f1416 60%);
+      }
+
+      .whale {
+        color: var(--aqua);
+        background: linear-gradient(145deg, #092126, #0d1518 60%);
+      }
+
+      .number {
+        margin-bottom: auto;
+        font: 700 10px "Space Mono", monospace;
+        letter-spacing: 0.14em;
+      }
+
+      .project h2 {
+        margin: 0 0 12px;
+        color: var(--text);
+        font-size: clamp(28px, 4vw, 44px);
+        letter-spacing: -0.055em;
+      }
+
+      .project p {
+        max-width: 440px;
+        margin: 0;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.6;
+      }
+
+      .open {
+        position: absolute;
+        right: 32px;
+        bottom: 32px;
+        font: 700 22px "Space Mono", monospace;
+      }
+
+      footer {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 28px;
+        color: #4f5b61;
+        font: 400 9px "Space Mono", monospace;
+        letter-spacing: 0.08em;
+      }
+
+      @media (max-width: 720px) {
+        .projects {
+          grid-template-columns: 1fr;
+        }
+
+        .project {
+          min-height: 280px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p class="eyebrow">FUN RESEARCH ARCHIVE / 2026</p>
+      <h1>재밌는 것을<br />실험합니다.</h1>
+      <p class="intro">
+        설치 없이 브라우저에서 바로 실행되는 작은 게임과 탐구 도구입니다.
+        아래 프로젝트를 골라 시작하세요.
+      </p>
+
+      <section class="projects" aria-label="프로젝트 목록">
+        <a class="project game" href="./바닥축구/">
+          <span class="number">PROJECT 01 · GAME</span>
+          <h2>바닥축구</h2>
+          <p>한 키보드로 친구와 대결하는 빠른 2인용 네온 풋살.</p>
+          <span class="open">↗</span>
+        </a>
+
+        <a class="project whale" href="./whale-lab/">
+          <span class="number">PROJECT 02 · BIOACOUSTICS</span>
+          <h2>고래·돌고래<br />언어 연구소</h2>
+          <p>수중 녹음의 파형, 주파수, 클릭과 휘파람 패턴을 탐색합니다.</p>
+          <span class="open">↗</span>
+        </a>
+      </section>
+
+      <footer>
+        <span>재밌는 연구소</span>
+        <span>BUILT FOR THE WEB</span>
+      </footer>
+    </main>
+  </body>
+</html>
