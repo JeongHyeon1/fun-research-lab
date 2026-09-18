@@ -533,6 +533,87 @@ h1 em {
   letter-spacing: 0.1em;
 }
 
+.section-title sup {
+  margin-left: 5px;
+  color: var(--acid);
+  font: 700 7px "Space Mono", monospace;
+  letter-spacing: 0.08em;
+}
+
+.species-section {
+  margin-top: 34px;
+}
+
+.species-candidates {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.species-card {
+  position: relative;
+  overflow: hidden;
+  min-height: 145px;
+  border: 1px solid var(--line-soft);
+  padding: 18px;
+  background: rgba(10, 32, 35, 0.72);
+}
+
+.species-card::after {
+  position: absolute;
+  right: -25px;
+  bottom: -38px;
+  width: 100px;
+  height: 100px;
+  border: 1px solid rgba(60, 231, 207, 0.09);
+  border-radius: 50%;
+  content: "";
+}
+
+.species-rank {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #5d7b7d;
+  font: 700 8px "Space Mono", monospace;
+  letter-spacing: 0.1em;
+}
+
+.species-rank strong {
+  color: var(--aqua);
+  font-size: 12px;
+}
+
+.species-card h3 {
+  margin: 17px 0 4px;
+  font-size: 14px;
+}
+
+.species-card > small {
+  color: #668184;
+  font-size: 9px;
+  font-style: italic;
+}
+
+.species-card p {
+  position: relative;
+  z-index: 1;
+  margin: 13px 0 0;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.species-warning {
+  margin: 10px 0 0;
+  padding-left: 11px;
+  border-left: 2px solid rgba(216, 240, 100, 0.45);
+  color: #70898a;
+  font-size: 9px;
+  line-height: 1.6;
+}
+
 .interpretation {
   margin-top: 34px;
 }
@@ -676,6 +757,10 @@ footer {
 
   .metrics article:nth-child(-n + 2) {
     border-bottom: 1px solid var(--line-soft);
+  }
+
+  .species-candidates {
+    grid-template-columns: 1fr;
   }
 }
 

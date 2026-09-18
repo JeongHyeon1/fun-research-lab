@@ -12,6 +12,7 @@ const spectrogramCanvas = document.querySelector("#spectrogramCanvas");
 const playhead = document.querySelector("#playhead");
 const timeReadout = document.querySelector("#timeReadout");
 const eventTimeline = document.querySelector("#eventTimeline");
+const speciesCandidatesElement = document.querySelector("#speciesCandidates");
 
 const metricElements = {
   dominantFrequency: document.querySelector("#dominantFrequency"),
@@ -159,6 +160,16 @@ function analyzeSignal(data, sampleRate, duration) {
     pulseRate,
     duration,
   });
+  const speciesCandidates = estimateSpeciesCandidates({
+    dominantFrequency,
+    spectralCentroid,
+    tonalness,
+    zeroCrossingRate,
+    events,
+    pulseRate,
+    duration,
+    pattern,
+  });
 
   return {
     dominantFrequency,
@@ -168,6 +179,7 @@ function analyzeSignal(data, sampleRate, duration) {
     tonalness,
     zeroCrossingRate,
     pattern,
+    speciesCandidates,
   };
 }
 
@@ -259,6 +271,105 @@ function classifyPattern(features) {
   };
 }
 
+function estimateSpeciesCandidates(features) {
+  const { dominantFrequency, spectralCentroid, tonalness, pulseRate, pattern } = features;
+  const isClickTrain = pattern.name === "펄스 클릭 열";
+  const isWhistle = pattern.name === "협대역 휘파람";
+  const isSustained = pattern.name === "지속 변조음";
+  const pulseFit = pulseRate ? clamp(pulseRate / 4, 0, 1) : 0;
+  const tonalFit = clamp((tonalness - 2) / 12, 0, 1);
+
+  const profiles = [
+    {
+      name: "향유고래",
+      scientific: "Physeter macrocephalus",
+      score:
+        14 +
+        Number(isClickTrain) * 38 +
+        bandFit(spectralCentroid, 1000, 14000) * 22 +
+        pulseFit * 13,
+      reason: "반복적인 광대역 클릭과 높은 스펙트럼 중심",
+    },
+    {
+      name: "혹등고래",
+      scientific: "Megaptera novaeangliae",
+      score:
+        15 +
+        Number(isSustained) * 32 +
+        bandFit(dominantFrequency, 80, 4000) * 24 +
+        tonalFit * 12,
+      reason: "이어지는 변조음과 저·중주파 배음 구조",
+    },
+    {
+      name: "대왕고래",
+      scientific: "Balaenoptera musculus",
+      score:
+        7 +
+        Number(isSustained) * 19 +
+        bandFit(dominantFrequency, 10, 120) * 44 +
+        (dominantFrequency < 80 ? 10 : 0),
+      reason: "매우 낮은 주파수의 길고 강한 발성",
+    },
+    {
+      name: "긴수염고래",
+      scientific: "Balaenoptera physalus",
+      score:
+        8 +
+        bandFit(dominantFrequency, 15, 180) * 36 +
+        (pulseRate >= 0.3 && pulseRate <= 2.5 ? 18 : 0) +
+        Number(isSustained) * 9,
+      reason: "저주파 펄스와 비교적 일정한 반복 간격",
+    },
+    {
+      name: "범고래",
+      scientific: "Orcinus orca",
+      score:
+        14 +
+        Number(isWhistle) * 30 +
+        Number(isClickTrain) * 13 +
+        bandFit(dominantFrequency, 400, 12000) * 21 +
+        bandFit(spectralCentroid, 900, 10000) * 10,
+      reason: "휘파람·펄스 호출과 중·고주파 에너지",
+    },
+    {
+      name: "큰돌고래",
+      scientific: "Tursiops truncatus",
+      score:
+        14 +
+        Number(isWhistle) * 34 +
+        Number(isClickTrain) * 9 +
+        bandFit(dominantFrequency, 1000, 16000) * 23 +
+        bandFit(spectralCentroid, 1800, 18000) * 9,
+      reason: "시그니처 휘슬 또는 빠른 반향정위 클릭",
+    },
+    {
+      name: "참고래류",
+      scientific: "Eubalaena spp.",
+      score:
+        11 +
+        Number(isSustained) * 24 +
+        bandFit(dominantFrequency, 50, 1000) * 32 +
+        tonalFit * 8,
+      reason: "낮은 주파수의 상승형·접촉성 호출음",
+    },
+  ];
+
+  return profiles
+    .map((profile) => ({
+      ...profile,
+      score: Math.round(clamp(profile.score, 5, 88)),
+    }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3);
+}
+
+function bandFit(value, low, high) {
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  if (value >= low && value <= high) return 1;
+  const edge = value < low ? low : high;
+  return Math.exp(-Math.abs(Math.log2(value / edge)) * 1.15);
+}
+
 function showAnalysis(analysis, duration) {
   metricElements.dominantFrequency.textContent = formatFrequency(analysis.dominantFrequency);
   metricElements.spectralCentroid.textContent = formatFrequency(analysis.spectralCentroid);
@@ -269,6 +380,7 @@ function showAnalysis(analysis, duration) {
   metricElements.patternDescription.textContent = analysis.pattern.description;
   metricElements.confidenceValue.textContent = `${Math.round(analysis.pattern.confidence)}%`;
   metricElements.confidenceBar.style.width = `${analysis.pattern.confidence}%`;
+  showSpeciesCandidates(analysis.speciesCandidates);
 
   eventTimeline.replaceChildren();
   analysis.events.slice(0, 160).forEach((time) => {
@@ -276,6 +388,28 @@ function showAnalysis(analysis, duration) {
     marker.style.left = `${clamp((time / duration) * 100, 0, 99.5)}%`;
     marker.title = formatDuration(time);
     eventTimeline.append(marker);
+  });
+}
+
+function showSpeciesCandidates(candidates) {
+  speciesCandidatesElement.replaceChildren();
+  candidates.forEach((candidate, index) => {
+    const card = document.createElement("article");
+    card.className = "species-card";
+
+    const rank = document.createElement("div");
+    rank.className = "species-rank";
+    rank.innerHTML = `<span>CANDIDATE ${String(index + 1).padStart(2, "0")}</span><strong>${candidate.score}%</strong>`;
+
+    const name = document.createElement("h3");
+    name.textContent = candidate.name;
+    const scientific = document.createElement("small");
+    scientific.textContent = candidate.scientific;
+    const reason = document.createElement("p");
+    reason.textContent = candidate.reason;
+
+    card.append(rank, name, scientific, reason);
+    speciesCandidatesElement.append(card);
   });
 }
 
@@ -714,3 +848,8 @@ window.addEventListener("resize", () => {
   drawWaveform(mono);
   drawSpectrogram(mono, currentBuffer.sampleRate);
 });
+
+const requestedSample = new URLSearchParams(window.location.search).get("sample");
+if (["clicks", "song", "whistle", "dolphin"].includes(requestedSample)) {
+  requestAnimationFrame(() => createSample(requestedSample));
+}
