@@ -560,6 +560,18 @@ h1 em {
   background: rgba(10, 32, 35, 0.72);
 }
 
+.species-card.species-rank-1 {
+  border-color: rgba(216, 240, 100, 0.55);
+  background:
+    linear-gradient(145deg, rgba(216, 240, 100, 0.08), transparent 60%),
+    rgba(10, 32, 35, 0.9);
+}
+
+.species-card.species-rank-1 .species-rank span,
+.species-card.species-rank-1 .species-rank strong {
+  color: var(--acid);
+}
+
 .species-card::after {
   position: absolute;
   right: -25px;

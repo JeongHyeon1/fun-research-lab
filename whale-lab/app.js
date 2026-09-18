@@ -395,11 +395,11 @@ function showSpeciesCandidates(candidates) {
   speciesCandidatesElement.replaceChildren();
   candidates.forEach((candidate, index) => {
     const card = document.createElement("article");
-    card.className = "species-card";
+    card.className = `species-card species-rank-${index + 1}`;
 
     const rank = document.createElement("div");
     rank.className = "species-rank";
-    rank.innerHTML = `<span>CANDIDATE ${String(index + 1).padStart(2, "0")}</span><strong>${candidate.score}%</strong>`;
+    rank.innerHTML = `<span>가능성 ${index + 1}위</span><strong>일치도 ${candidate.score}%</strong>`;
 
     const name = document.createElement("h3");
     name.textContent = candidate.name;
