@@ -54,6 +54,7 @@ let lastPingAt = 0;
 let roundTripMs = null;
 let localKickArmed = false;
 let localBallPredictionUntil = 0;
+let wallBouncePredictionUntil = 0;
 
 nicknameInput.value = localStorage.getItem("futsal-nickname") || `PLAYER-${Math.floor(1000 + Math.random() * 9000)}`;
 playerNumberInput.value = localStorage.getItem("futsal-player-number") || "10";
@@ -362,6 +363,7 @@ function returnToLobby() {
   previousScores = { blue: 0, red: 0 };
   previousStatus = "waiting";
   localBallPredictionUntil = 0;
+  wallBouncePredictionUntil = 0;
   localKickArmed = false;
   keys.clear();
   lobbyView.classList.remove("hidden");
@@ -518,6 +520,15 @@ function smoothRenderedState(dt) {
     localBallPredictionUntil > performance.now() &&
     serverLocalPlayer?.kickFlash > 0 &&
     Math.hypot(target.ball.vx, target.ball.vy) > 120;
+  const currentBallSpeed = Math.hypot(currentBall.vx || 0, currentBall.vy || 0);
+  const serverBallSpeed = Math.hypot(target.ball.vx, target.ball.vy);
+  const serverConfirmedBounce =
+    wallBouncePredictionUntil > performance.now() &&
+    currentBallSpeed > 20 &&
+    serverBallSpeed > 20 &&
+    (currentBall.vx * target.ball.vx + currentBall.vy * target.ball.vy) /
+      (currentBallSpeed * serverBallSpeed) >
+      0.35;
 
   if (serverConfirmedKick) {
     localBallPredictionUntil = 0;
@@ -526,7 +537,10 @@ function smoothRenderedState(dt) {
       x: serverBallX,
       y: serverBallY,
     };
-  } else if (localBallPredictionUntil > performance.now()) {
+  } else if (
+    localBallPredictionUntil > performance.now() ||
+    (wallBouncePredictionUntil > performance.now() && !serverConfirmedBounce)
+  ) {
     const drag = Math.pow(0.36, dt);
     renderedState.ball = {
       ...currentBall,
@@ -536,21 +550,16 @@ function smoothRenderedState(dt) {
       vy: (currentBall.vy || 0) * drag,
     };
   } else {
-    const predictedBallX = currentBall.x + (currentBall.vx || 0) * dt;
-    const predictedBallY = currentBall.y + (currentBall.vy || 0) * dt;
-    const ballError = Math.hypot(serverBallX - predictedBallX, serverBallY - predictedBallY);
-    const ballCorrectionRate = ballError > 90 ? 22 : 10;
-    const ballCorrection = 1 - Math.exp(-ballCorrectionRate * dt);
-    const ballVelocityBlend = 1 - Math.exp(-18 * dt);
+    if (serverConfirmedBounce) wallBouncePredictionUntil = 0;
     renderedState.ball = {
       ...target.ball,
-      x: lerp(predictedBallX, serverBallX, ballCorrection),
-      y: lerp(predictedBallY, serverBallY, ballCorrection),
-      vx: lerp(currentBall.vx || 0, target.ball.vx, ballVelocityBlend),
-      vy: lerp(currentBall.vy || 0, target.ball.vy, ballVelocityBlend),
+      x: serverBallX,
+      y: serverBallY,
     };
   }
-  constrainRenderedBall(renderedState.ball, renderedState);
+  if (constrainRenderedBall(renderedState.ball, renderedState)) {
+    wallBouncePredictionUntil = performance.now() + 350;
+  }
   if (localKickArmed && isKickHeld() && predictLocalKick(255)) localKickArmed = false;
 
   const speed = Math.hypot(target.ball.vx, target.ball.vy);
@@ -597,51 +606,70 @@ function predictLocalKick(power = 565) {
 
 function constrainRenderedBall(ball, state) {
   const { field, goal } = WORLD;
+  let reflected = false;
   if (state.status === "goal" && state.lastGoalSide) {
     const isRight = state.lastGoalSide === "right";
     const front = isRight ? field.right : field.left;
     const back = front + (isRight ? goal.depth : -goal.depth);
-    reflectBallX(ball, Math.min(front, back) + ball.radius, Math.max(front, back) - ball.radius, 0.48);
-    reflectBallY(ball, goal.top + ball.radius, goal.bottom - ball.radius, 0.48);
-    return;
+    reflected =
+      reflectBallX(ball, Math.min(front, back) + ball.radius, Math.max(front, back) - ball.radius, 0.48) ||
+      reflected;
+    reflected = reflectBallY(ball, goal.top + ball.radius, goal.bottom - ball.radius, 0.48) || reflected;
+    return reflected;
   }
 
-  reflectBallY(ball, field.top + ball.radius, field.bottom - ball.radius, 0.52);
+  reflected = reflectBallY(ball, field.top + ball.radius, field.bottom - ball.radius, 0.52) || reflected;
   const inGoalMouth = ball.y > goal.top + ball.radius * 0.15 && ball.y < goal.bottom - ball.radius * 0.15;
   if (!inGoalMouth) {
-    reflectBallX(ball, field.left + ball.radius, field.right - ball.radius, 0.52);
+    reflected = reflectBallX(ball, field.left + ball.radius, field.right - ball.radius, 0.52) || reflected;
   } else {
-    reflectBallX(
-      ball,
-      field.left - goal.depth + ball.radius,
-      field.right + goal.depth - ball.radius,
-      0.48,
-    );
+    reflected =
+      reflectBallX(
+        ball,
+        field.left - goal.depth + ball.radius,
+        field.right + goal.depth - ball.radius,
+        0.48,
+      ) || reflected;
   }
-  resolveRenderedPost(ball, field.left, goal.top);
-  resolveRenderedPost(ball, field.left, goal.bottom);
-  resolveRenderedPost(ball, field.right, goal.top);
-  resolveRenderedPost(ball, field.right, goal.bottom);
+  reflected = resolveRenderedPost(ball, field.left, goal.top) || reflected;
+  reflected = resolveRenderedPost(ball, field.left, goal.bottom) || reflected;
+  reflected = resolveRenderedPost(ball, field.right, goal.top) || reflected;
+  reflected = resolveRenderedPost(ball, field.right, goal.bottom) || reflected;
+  return reflected;
 }
 
 function reflectBallX(ball, minimum, maximum, restitution) {
   if (ball.x < minimum) {
     ball.x = minimum;
-    if (ball.vx < 0) ball.vx = -ball.vx * restitution;
+    if (ball.vx < 0) {
+      ball.vx = -ball.vx * restitution;
+      return true;
+    }
   } else if (ball.x > maximum) {
     ball.x = maximum;
-    if (ball.vx > 0) ball.vx = -ball.vx * restitution;
+    if (ball.vx > 0) {
+      ball.vx = -ball.vx * restitution;
+      return true;
+    }
   }
+  return false;
 }
 
 function reflectBallY(ball, minimum, maximum, restitution) {
   if (ball.y < minimum) {
     ball.y = minimum;
-    if (ball.vy < 0) ball.vy = -ball.vy * restitution;
+    if (ball.vy < 0) {
+      ball.vy = -ball.vy * restitution;
+      return true;
+    }
   } else if (ball.y > maximum) {
     ball.y = maximum;
-    if (ball.vy > 0) ball.vy = -ball.vy * restitution;
+    if (ball.vy > 0) {
+      ball.vy = -ball.vy * restitution;
+      return true;
+    }
   }
+  return false;
 }
 
 function resolveRenderedPost(ball, x, y) {
@@ -649,7 +677,7 @@ function resolveRenderedPost(ball, x, y) {
   let dy = ball.y - y;
   let distance = Math.hypot(dx, dy);
   const minimum = ball.radius + 8;
-  if (distance >= minimum) return;
+  if (distance >= minimum) return false;
   if (distance < 0.001) {
     dx = 1;
     dy = 0;
@@ -663,7 +691,9 @@ function resolveRenderedPost(ball, x, y) {
   if (velocity < 0) {
     ball.vx -= 1.82 * velocity * nx;
     ball.vy -= 1.82 * velocity * ny;
+    return true;
   }
+  return false;
 }
 
 function isKickHeld() {
