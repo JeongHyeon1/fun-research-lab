@@ -791,6 +791,109 @@ select:focus {
   margin: 0;
 }
 
+.room-chat {
+  display: grid;
+  grid-template-columns: 150px 1fr minmax(280px, 0.55fr);
+  align-items: stretch;
+  margin-top: 14px;
+  border: 1px solid var(--line);
+  background: rgba(10, 13, 16, 0.92);
+}
+
+.chat-heading {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border-right: 1px solid var(--line);
+  padding: 14px;
+}
+
+.chat-heading span {
+  color: var(--acid);
+  font: 700 9px "Space Mono", monospace;
+  letter-spacing: 0.12em;
+}
+
+.chat-heading small {
+  margin-top: 6px;
+  color: #58636a;
+  font-size: 8px;
+  line-height: 1.45;
+}
+
+.chat-messages {
+  display: flex;
+  min-width: 0;
+  max-height: 92px;
+  flex-direction: column;
+  gap: 5px;
+  overflow-y: auto;
+  padding: 11px 14px;
+  scrollbar-color: #3b474e transparent;
+  scrollbar-width: thin;
+}
+
+.chat-empty {
+  margin: auto 0;
+  color: #59646b;
+  font-size: 9px;
+}
+
+.chat-message {
+  margin: 0;
+  color: #c7d0d3;
+  font-size: 10px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.chat-message strong {
+  margin-right: 6px;
+  font: 700 9px "Space Mono", monospace;
+}
+
+.chat-message.blue strong {
+  color: var(--blue);
+}
+
+.chat-message.red strong {
+  color: var(--red);
+}
+
+.chat-message.me {
+  color: #f3f6f7;
+}
+
+.chat-form {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 7px;
+  align-items: center;
+  border-left: 1px solid var(--line);
+  padding: 10px;
+}
+
+.chat-form input {
+  min-width: 0;
+  padding: 10px 11px;
+  font-size: 11px;
+}
+
+.chat-form button {
+  height: 100%;
+  border: 1px solid var(--acid);
+  padding: 0 14px;
+  background: transparent;
+  color: var(--acid);
+  cursor: pointer;
+  font: 800 9px "Space Mono", monospace;
+}
+
+.chat-form button:hover {
+  background: var(--acid);
+  color: #0a0d0e;
+}
+
 .toast {
   position: fixed;
   right: 22px;
@@ -862,5 +965,23 @@ select:focus {
 
   .game-footer p:last-child {
     display: none;
+  }
+
+  .room-chat {
+    grid-template-columns: 1fr;
+  }
+
+  .chat-heading {
+    display: none;
+  }
+
+  .chat-messages {
+    min-height: 74px;
+    max-height: 110px;
+  }
+
+  .chat-form {
+    border-top: 1px solid var(--line);
+    border-left: 0;
   }
 }

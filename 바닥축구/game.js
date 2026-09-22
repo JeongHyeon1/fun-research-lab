@@ -27,6 +27,9 @@ const messageElement = $("#message");
 const toastElement = $("#toast");
 const connectionDot = $("#connectionDot");
 const networkBadge = $("#networkBadge");
+const chatMessages = $("#chatMessages");
+const chatForm = $("#chatForm");
+const chatInput = $("#chatInput");
 
 const API_BASE = String(window.FUTSAL_CONFIG?.apiBase || "http://localhost:8787").replace(/\/$/, "");
 const keys = new Set();
@@ -34,6 +37,7 @@ const particles = [];
 const ballTrail = [];
 let socket = null;
 let playerId = null;
+
 let activeRoom = null;
 let latestSnapshot = null;
 let renderedState = null;
@@ -55,6 +59,7 @@ let roundTripMs = null;
 let localKickArmed = false;
 let localBallPredictionUntil = 0;
 let wallBouncePredictionUntil = 0;
+const renderedChatIds = new Set();
 
 nicknameInput.value = localStorage.getItem("futsal-nickname") || `PLAYER-${Math.floor(1000 + Math.random() * 9000)}`;
 playerNumberInput.value = localStorage.getItem("futsal-player-number") || "10";
@@ -226,12 +231,17 @@ function handleServerMessage(message) {
     playerId = message.playerId;
     activeRoom = message.room;
     sessionStorage.setItem(`futsal-token:${activeRoom.id}`, message.token);
+    renderChatHistory(message.chatHistory || []);
     applySnapshot(message.state, message.serverTime, true);
     showToast(`${message.state.players.find((player) => player.id === playerId)?.team.toUpperCase()} 팀 참가 완료`);
     return;
   }
   if (message.type === "state") {
     applySnapshot(message.state, message.serverTime, message.immediate);
+    return;
+  }
+  if (message.type === "chat") {
+    appendChatMessage(message.chat);
     return;
   }
   if (message.type === "pong") {
@@ -365,6 +375,9 @@ function returnToLobby() {
   localBallPredictionUntil = 0;
   wallBouncePredictionUntil = 0;
   localKickArmed = false;
+  renderedChatIds.clear();
+  chatMessages.replaceChildren();
+  showEmptyChat();
   keys.clear();
   lobbyView.classList.remove("hidden");
   gameView.classList.add("hidden");
@@ -426,6 +439,45 @@ function sendInput() {
       },
     }),
   );
+}
+
+function sendChat(event) {
+  event.preventDefault();
+  const text = chatInput.value.replace(/\s+/g, " ").trim().slice(0, 120);
+  if (!text || socket?.readyState !== WebSocket.OPEN) return;
+  socket.send(JSON.stringify({ type: "chat", text }));
+  chatInput.value = "";
+  chatInput.focus();
+}
+
+function renderChatHistory(history) {
+  renderedChatIds.clear();
+  chatMessages.replaceChildren();
+  history.forEach(appendChatMessage);
+  if (!history.length) showEmptyChat();
+}
+
+function appendChatMessage(chat) {
+  if (!chat?.id || renderedChatIds.has(chat.id)) return;
+  renderedChatIds.add(chat.id);
+  chatMessages.querySelector(".chat-empty")?.remove();
+  const line = document.createElement("p");
+  line.className = `chat-message ${chat.team === "red" ? "red" : "blue"} ${chat.playerId === playerId ? "me" : ""}`;
+  const author = document.createElement("strong");
+  author.textContent = `[${chat.number}] ${chat.name}`;
+  const text = document.createElement("span");
+  text.textContent = chat.text;
+  line.append(author, text);
+  chatMessages.append(line);
+  while (chatMessages.children.length > 40) chatMessages.firstElementChild.remove();
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function showEmptyChat() {
+  const empty = document.createElement("p");
+  empty.className = "chat-empty";
+  empty.textContent = "아직 메시지가 없습니다.";
+  chatMessages.append(empty);
 }
 
 function animate(now) {
@@ -557,8 +609,9 @@ function smoothRenderedState(dt) {
       y: serverBallY,
     };
   }
+  const visualBallSpeed = Math.hypot(renderedState.ball.vx || 0, renderedState.ball.vy || 0);
   if (constrainRenderedBall(renderedState.ball, renderedState)) {
-    wallBouncePredictionUntil = performance.now() + 350;
+    wallBouncePredictionUntil = visualBallSpeed > 300 ? performance.now() + 350 : 0;
   }
   if (localKickArmed && isKickHeld() && predictLocalKick(255)) localKickArmed = false;
 
@@ -1027,6 +1080,9 @@ function clamp(value, minimum, maximum) {
 }
 
 window.addEventListener("keydown", (event) => {
+  if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement) {
+    return;
+  }
   if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "KeyX", "ControlLeft", "ControlRight", "Space"].includes(event.code)) {
     event.preventDefault();
     const kickWasHeld = isKickHeld();
@@ -1054,6 +1110,12 @@ leaveButton.addEventListener("click", leaveRoom);
 soundButton.addEventListener("click", toggleSound);
 nicknameInput.addEventListener("change", saveNickname);
 playerNumberInput.addEventListener("change", () => savePlayerNumber(true));
+chatForm.addEventListener("submit", sendChat);
+chatInput.addEventListener("focus", () => {
+  keys.clear();
+  localKickArmed = false;
+  sendInput();
+});
 
 loadRooms(true);
 roomPollTimer = setInterval(loadRooms, 2500);

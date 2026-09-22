@@ -161,6 +161,7 @@ export class GameRoom {
     this.clients = new Map();
     this.tokenPlayers = new Map();
     this.disconnectTimers = new Map();
+    this.chatHistory = [];
     this.loopTimer = null;
     this.lastLoopAt = Date.now();
     this.lastBroadcastAt = 0;
@@ -238,6 +239,7 @@ export class GameRoom {
       lastMessageAt: 0,
       messagesThisSecond: 0,
       rateWindowAt: Date.now(),
+      lastChatAt: 0,
     };
     this.clients.set(player.id, connection);
 
@@ -251,6 +253,7 @@ export class GameRoom {
       token,
       room: this.config,
       state: serializeMatch(this.match),
+      chatHistory: this.chatHistory,
       serverTime: Date.now(),
     });
     if (canStartMatch(this.match)) startMatchCountdown(this.match);
@@ -278,7 +281,29 @@ export class GameRoom {
       return;
     }
     if (message.type === "input") setPlayerInput(this.match, connection.playerId, message.input);
+    if (message.type === "chat") this.handleChat(connection, message.text, now);
     if (message.type === "ping") this.send(connection, { type: "pong", sentAt: message.sentAt, serverTime: now });
+  }
+
+  handleChat(connection, rawText, now) {
+    if (now - connection.lastChatAt < 600) return;
+    const text = sanitizeChat(rawText);
+    if (!text) return;
+    const player = this.match.players.find((entry) => entry.id === connection.playerId);
+    if (!player) return;
+    connection.lastChatAt = now;
+    const chat = {
+      id: crypto.randomUUID(),
+      playerId: player.id,
+      name: player.name,
+      number: player.number,
+      team: player.team,
+      text,
+      sentAt: now,
+    };
+    this.chatHistory.push(chat);
+    if (this.chatHistory.length > 40) this.chatHistory.shift();
+    this.broadcastEvent({ type: "chat", chat });
   }
 
   handleDisconnect(connection) {
@@ -341,6 +366,17 @@ export class GameRoom {
     for (const connection of this.clients.values()) {
       try {
         connection.socket.send(payload);
+      } catch {
+        this.handleDisconnect(connection);
+      }
+    }
+  }
+
+  broadcastEvent(payload) {
+    const message = JSON.stringify(payload);
+    for (const connection of this.clients.values()) {
+      try {
+        connection.socket.send(message);
       } catch {
         this.handleDisconnect(connection);
       }
@@ -456,6 +492,14 @@ function sanitizeText(value, maximum, fallback) {
 function sanitizeToken(value) {
   const token = String(value ?? "");
   return /^[a-f0-9-]{20,64}$/i.test(token) ? token : "";
+}
+
+function sanitizeChat(value) {
+  return String(value ?? "")
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
 }
 
 function sanitizePlayerNumber(value) {

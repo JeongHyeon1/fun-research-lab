@@ -146,6 +146,26 @@
           <p><kbd>X</kbd> <kbd>CTRL</kbd> <kbd>SPACE</kbd> 슛</p>
           <p>동점 종료 시 GOLDEN GOAL</p>
         </div>
+
+        <section class="room-chat" aria-label="방 채팅">
+          <div class="chat-heading">
+            <span>ROOM CHAT</span>
+            <small>같은 방의 선수만 볼 수 있습니다.</small>
+          </div>
+          <div id="chatMessages" class="chat-messages" aria-live="polite">
+            <p class="chat-empty">아직 메시지가 없습니다.</p>
+          </div>
+          <form id="chatForm" class="chat-form">
+            <input
+              id="chatInput"
+              type="text"
+              maxlength="120"
+              autocomplete="off"
+              placeholder="메시지를 입력하고 Enter"
+            />
+            <button type="submit">전송</button>
+          </form>
+        </section>
       </section>
 
       <div id="toast" class="toast" role="status"></div>

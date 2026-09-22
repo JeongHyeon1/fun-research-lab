@@ -4,7 +4,7 @@ export const WORLD = Object.freeze({
   field: { left: 90, right: 1190, top: 76, bottom: 644 },
   goal: { top: 260, bottom: 460, depth: 58 },
   playerRadius: 23,
-  ballRadius: 13,
+  ballRadius: 11,
   playerLineMargin: 40,
 });
 

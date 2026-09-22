@@ -23,6 +23,12 @@ blue.socket.send(
   }),
 );
 
+const chatPromise = waitFor(red.socket, (message) => message.type === "chat");
+blue.socket.send(JSON.stringify({ type: "chat", text: "테스트 메시지" }));
+const chatMessage = await chatPromise;
+assert.equal(chatMessage.chat.text, "테스트 메시지");
+assert.equal(chatMessage.chat.name, "BLUE-TEST");
+
 const listedResponse = await fetch(`${apiBase}/api/rooms`);
 const listed = await listedResponse.json();
 const listedRoom = listed.rooms.find((entry) => entry.id === room.id);
