@@ -11,6 +11,7 @@ export const WORLD = Object.freeze({
 const PLAYER_ACCELERATION = 1500;
 const PLAYER_MAX_SPEED = 330;
 const KICK_POWER = 565;
+const RECEIVE_TOUCH_POWER = 255;
 const KICK_RANGE_BONUS = 22;
 const KICK_COOLDOWN = 0.36;
 const GOAL_PAUSE_SECONDS = 1.65;
@@ -65,6 +66,7 @@ export function addMatchPlayer(state, player) {
     facingY: 0,
     kickCooldown: 0,
     kickFlash: 0,
+    kickArmed: false,
     input: { up: false, down: false, left: false, right: false, kick: false, sequence: 0 },
     previousKick: false,
   };
@@ -288,26 +290,30 @@ function updatePlayer(player, state, dt) {
   player.kickCooldown = Math.max(0, player.kickCooldown - dt);
   player.kickFlash = Math.max(0, player.kickFlash - dt);
   const kickPressed = input.kick === true;
-  if (kickPressed && !player.previousKick && player.kickCooldown <= 0) {
-    tryKick(state.ball, player);
+  const justPressedKick = kickPressed && !player.previousKick;
+  if (justPressedKick) player.kickArmed = true;
+  if (!kickPressed) player.kickArmed = false;
+  if (kickPressed && player.kickArmed && player.kickCooldown <= 0) {
+    const power = justPressedKick ? KICK_POWER : RECEIVE_TOUCH_POWER;
+    if (tryKick(state.ball, player, power)) player.kickArmed = false;
   }
   player.previousKick = kickPressed;
 }
 
-function tryKick(ball, player) {
-  player.kickCooldown = KICK_COOLDOWN;
+function tryKick(ball, player, power) {
   const dx = ball.x - player.x;
   const dy = ball.y - player.y;
   const distance = Math.hypot(dx, dy);
   if (distance > player.radius + ball.radius + KICK_RANGE_BONUS) return false;
 
+  player.kickCooldown = KICK_COOLDOWN;
   const nx = distance > 0.0001 ? dx / distance : player.facingX;
   const ny = distance > 0.0001 ? dy / distance : player.facingY;
   const aimX = nx * 0.58 + player.facingX * 0.42;
   const aimY = ny * 0.58 + player.facingY * 0.42;
   const aimLength = Math.hypot(aimX, aimY) || 1;
-  ball.vx = (aimX / aimLength) * KICK_POWER + player.vx * 0.18;
-  ball.vy = (aimY / aimLength) * KICK_POWER + player.vy * 0.18;
+  ball.vx = (aimX / aimLength) * power + player.vx * 0.18;
+  ball.vy = (aimY / aimLength) * power + player.vy * 0.18;
   player.kickFlash = 0.16;
   return true;
 }
@@ -551,6 +557,7 @@ function resetPositions(state) {
     player.facingY = 0;
     player.kickCooldown = 0;
     player.kickFlash = 0;
+    player.kickArmed = false;
     player.previousKick = player.input.kick;
   });
   state.ball = createBall();

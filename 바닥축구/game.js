@@ -52,6 +52,7 @@ let inputTimer = 0;
 let lastFrameAt = performance.now();
 let lastPingAt = 0;
 let roundTripMs = null;
+let localKickArmed = false;
 
 nicknameInput.value = localStorage.getItem("futsal-nickname") || `PLAYER-${Math.floor(1000 + Math.random() * 9000)}`;
 playerNumberInput.value = localStorage.getItem("futsal-player-number") || "10";
@@ -520,6 +521,8 @@ function smoothRenderedState(dt) {
     vx: lerp(currentBall.vx || 0, target.ball.vx, ballVelocityBlend),
     vy: lerp(currentBall.vy || 0, target.ball.vy, ballVelocityBlend),
   };
+  constrainRenderedBall(renderedState.ball, renderedState);
+  if (localKickArmed && isKickHeld() && predictLocalKick(255)) localKickArmed = false;
 
   const speed = Math.hypot(target.ball.vx, target.ball.vy);
   if (speed > 80) {
@@ -541,24 +544,54 @@ function getLocalInputVector() {
   return { x, y, length };
 }
 
-function predictLocalKick() {
-  if (!renderedState || !playerId) return;
+function predictLocalKick(power = 565) {
+  if (!renderedState || !playerId) return false;
   const player = renderedState.players.find((entry) => entry.id === playerId);
   const ball = renderedState.ball;
-  if (!player || !ball) return;
+  if (!player || !ball) return false;
   const dx = ball.x - player.x;
   const dy = ball.y - player.y;
   const distance = Math.hypot(dx, dy);
-  if (distance > player.radius + ball.radius + 22) return;
+  if (distance > player.radius + ball.radius + 22) return false;
   const nx = distance > 0.001 ? dx / distance : player.facingX;
   const ny = distance > 0.001 ? dy / distance : player.facingY;
   const aimX = nx * 0.58 + player.facingX * 0.42;
   const aimY = ny * 0.58 + player.facingY * 0.42;
   const length = Math.hypot(aimX, aimY) || 1;
-  ball.vx = (aimX / length) * 565 + player.vx * 0.18;
-  ball.vy = (aimY / length) * 565 + player.vy * 0.18;
+  ball.vx = (aimX / length) * power + player.vx * 0.18;
+  ball.vy = (aimY / length) * power + player.vy * 0.18;
   player.kickFlash = 0.16;
   playTone(105, 0.07, "triangle", 0.04);
+  return true;
+}
+
+function constrainRenderedBall(ball, state) {
+  const { field, goal } = WORLD;
+  if (state.status === "goal" && state.lastGoalSide) {
+    const isRight = state.lastGoalSide === "right";
+    const front = isRight ? field.right : field.left;
+    const back = front + (isRight ? goal.depth : -goal.depth);
+    ball.x = clamp(ball.x, Math.min(front, back) + ball.radius, Math.max(front, back) - ball.radius);
+    ball.y = clamp(ball.y, goal.top + ball.radius, goal.bottom - ball.radius);
+    return;
+  }
+
+  ball.y = clamp(ball.y, field.top + ball.radius, field.bottom - ball.radius);
+  const inGoalMouth = ball.y > goal.top + ball.radius * 0.15 && ball.y < goal.bottom - ball.radius * 0.15;
+  if (!inGoalMouth) {
+    ball.x = clamp(ball.x, field.left + ball.radius, field.right - ball.radius);
+  } else {
+    ball.x = clamp(ball.x, field.left - ball.radius * 0.3, field.right + ball.radius * 0.3);
+  }
+}
+
+function isKickHeld() {
+  return (
+    keys.has("KeyX") ||
+    keys.has("ControlLeft") ||
+    keys.has("ControlRight") ||
+    keys.has("Space")
+  );
 }
 
 function draw() {
@@ -885,19 +918,25 @@ function clamp(value, minimum, maximum) {
 window.addEventListener("keydown", (event) => {
   if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "KeyX", "ControlLeft", "ControlRight", "Space"].includes(event.code)) {
     event.preventDefault();
+    const kickWasHeld = isKickHeld();
     const wasPressed = keys.has(event.code);
     keys.add(event.code);
-    if (!wasPressed && ["KeyX", "ControlLeft", "ControlRight", "Space"].includes(event.code)) {
-      predictLocalKick();
+    if (!wasPressed && !kickWasHeld && ["KeyX", "ControlLeft", "ControlRight", "Space"].includes(event.code)) {
+      localKickArmed = true;
+      if (predictLocalKick(565)) localKickArmed = false;
     }
     sendInput();
   }
 });
 window.addEventListener("keyup", (event) => {
   keys.delete(event.code);
+  if (!isKickHeld()) localKickArmed = false;
   sendInput();
 });
-window.addEventListener("blur", () => keys.clear());
+window.addEventListener("blur", () => {
+  keys.clear();
+  localKickArmed = false;
+});
 createRoomForm.addEventListener("submit", createRoom);
 refreshButton.addEventListener("click", () => loadRooms(true));
 leaveButton.addEventListener("click", leaveRoom);

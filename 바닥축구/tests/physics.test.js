@@ -103,6 +103,40 @@ test("kick input is meaningfully stronger than passive dribbling", () => {
   assert.ok(Math.hypot(state.ball.vx, state.ball.vy) > 450);
 });
 
+test("holding kick before receiving a pass produces one soft touch", () => {
+  const state = createPlayingMatch();
+  const player = state.players[0];
+  player.x = 500;
+  player.y = 360;
+  player.facingX = 1;
+  player.facingY = 0;
+  state.ball.x = 700;
+  state.ball.y = 360;
+
+  setPlayerInput(state, player.id, {
+    right: false,
+    left: false,
+    up: false,
+    down: false,
+    kick: true,
+    sequence: 1,
+  });
+  stepMatch(state, 1 / 60);
+  assert.equal(player.kickArmed, true);
+
+  state.ball.x = 536;
+  state.ball.y = 360;
+  state.ball.vx = -80;
+  stepMatch(state, 1 / 60);
+  const receiveSpeed = Math.hypot(state.ball.vx, state.ball.vy);
+  assert.ok(receiveSpeed > 190 && receiveSpeed < 400, `receive touch speed was ${receiveSpeed}`);
+  assert.equal(player.kickArmed, false);
+
+  const speedAfterTouch = receiveSpeed;
+  stepMatch(state, 1 / 60);
+  assert.ok(Math.hypot(state.ball.vx, state.ball.vy) <= speedAfterTouch + 5, "held key must not kick repeatedly");
+});
+
 test("ball and player do not overlap when pinned into a corner", () => {
   const state = createPlayingMatch();
   const player = state.players[0];
