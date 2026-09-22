@@ -14,7 +14,7 @@ import {
 const LOBBY_NAME = "global";
 const ROOM_MAX_AGE_MS = 2 * 60 * 60 * 1000;
 const RECONNECT_GRACE_MS = 15_000;
-const BROADCAST_INTERVAL_MS = 50;
+const BROADCAST_INTERVAL_MS = 33;
 const SIMULATION_INTERVAL_MS = 16;
 
 export default {

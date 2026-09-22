@@ -413,22 +413,36 @@ function smoothRenderedState(dt) {
   renderedState.status = target.status;
   renderedState.goldenGoal = target.goldenGoal;
   renderedState.scores = target.scores;
+  const snapshotAge = Math.min(0.1, (performance.now() - latestSnapshot.receivedAt) / 1000);
   renderedState.players = target.players.map((player) => {
     const current = renderedState.players.find((entry) => entry.id === player.id) || player;
-    const blend = 1 - Math.exp(-20 * dt);
+    const predictedX = current.x + current.vx * dt;
+    const predictedY = current.y + current.vy * dt;
+    const serverX = player.x + player.vx * snapshotAge;
+    const serverY = player.y + player.vy * snapshotAge;
+    const correction = 1 - Math.exp(-(player.id === playerId ? 9 : 12) * dt);
+    const velocityBlend = 1 - Math.exp(-18 * dt);
     return {
       ...player,
-      x: lerp(current.x, player.x, blend),
-      y: lerp(current.y, player.y, blend),
-      vx: player.vx,
-      vy: player.vy,
+      x: lerp(predictedX, serverX, correction),
+      y: lerp(predictedY, serverY, correction),
+      vx: lerp(current.vx, player.vx, velocityBlend),
+      vy: lerp(current.vy, player.vy, velocityBlend),
     };
   });
-  const ballBlend = 1 - Math.exp(-24 * dt);
+  const currentBall = renderedState.ball;
+  const predictedBallX = currentBall.x + (currentBall.vx || 0) * dt;
+  const predictedBallY = currentBall.y + (currentBall.vy || 0) * dt;
+  const serverBallX = target.ball.x + target.ball.vx * snapshotAge;
+  const serverBallY = target.ball.y + target.ball.vy * snapshotAge;
+  const ballCorrection = 1 - Math.exp(-14 * dt);
+  const ballVelocityBlend = 1 - Math.exp(-20 * dt);
   renderedState.ball = {
     ...target.ball,
-    x: lerp(renderedState.ball.x, target.ball.x, ballBlend),
-    y: lerp(renderedState.ball.y, target.ball.y, ballBlend),
+    x: lerp(predictedBallX, serverBallX, ballCorrection),
+    y: lerp(predictedBallY, serverBallY, ballCorrection),
+    vx: lerp(currentBall.vx || 0, target.ball.vx, ballVelocityBlend),
+    vy: lerp(currentBall.vy || 0, target.ball.vy, ballVelocityBlend),
   };
 
   const speed = Math.hypot(target.ball.vx, target.ball.vy);
@@ -447,22 +461,9 @@ function draw() {
   drawField();
   if (!renderedState) return;
   drawBallTrail();
-  renderedState.players.forEach((player) => drawPlayer(predictedPlayer(player), player.id === playerId));
+  renderedState.players.forEach((player) => drawPlayer(player, player.id === playerId));
   drawBall(renderedState.ball);
   drawParticles();
-}
-
-function predictedPlayer(player) {
-  if (player.id !== playerId || !latestSnapshot) return player;
-  const age = Math.min(0.08, (performance.now() - latestSnapshot.receivedAt) / 1000);
-  let x = Number(keys.has("ArrowRight")) - Number(keys.has("ArrowLeft"));
-  let y = Number(keys.has("ArrowDown")) - Number(keys.has("ArrowUp"));
-  const length = Math.hypot(x, y);
-  if (length) {
-    x /= length;
-    y /= length;
-  }
-  return { ...player, x: player.x + x * 230 * age, y: player.y + y * 230 * age };
 }
 
 function drawBackground() {
