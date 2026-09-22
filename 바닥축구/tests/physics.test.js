@@ -155,6 +155,17 @@ test("ball and player do not overlap when pinned into a corner", () => {
   assert.ok(state.ball.y >= WORLD.field.top + state.ball.radius);
 });
 
+test("the ball reflects immediately from pitch walls", () => {
+  const state = createPlayingMatch();
+  state.ball.x = 500;
+  state.ball.y = WORLD.field.top + state.ball.radius + 1;
+  state.ball.vx = 120;
+  state.ball.vy = -500;
+  stepMatch(state, 1 / 60);
+  assert.ok(state.ball.y >= WORLD.field.top + state.ball.radius);
+  assert.ok(state.ball.vy > 0, `wall rebound velocity was ${state.ball.vy}`);
+});
+
 test("a tied match enters golden goal and the next goal wins", () => {
   const state = createPlayingMatch();
   state.remainingSeconds = 0.01;

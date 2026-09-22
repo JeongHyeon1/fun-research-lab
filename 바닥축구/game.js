@@ -512,12 +512,21 @@ function smoothRenderedState(dt) {
   });
   const currentBall = renderedState.ball;
   const serverLocalPlayer = target.players.find((player) => player.id === playerId);
+  const serverBallX = target.ball.x + target.ball.vx * snapshotAge;
+  const serverBallY = target.ball.y + target.ball.vy * snapshotAge;
   const serverConfirmedKick =
     localBallPredictionUntil > performance.now() &&
     serverLocalPlayer?.kickFlash > 0 &&
     Math.hypot(target.ball.vx, target.ball.vy) > 120;
 
-  if (localBallPredictionUntil > performance.now() && !serverConfirmedKick) {
+  if (serverConfirmedKick) {
+    localBallPredictionUntil = 0;
+    renderedState.ball = {
+      ...target.ball,
+      x: serverBallX,
+      y: serverBallY,
+    };
+  } else if (localBallPredictionUntil > performance.now()) {
     const drag = Math.pow(0.36, dt);
     renderedState.ball = {
       ...currentBall,
@@ -527,11 +536,8 @@ function smoothRenderedState(dt) {
       vy: (currentBall.vy || 0) * drag,
     };
   } else {
-    if (serverConfirmedKick) localBallPredictionUntil = 0;
     const predictedBallX = currentBall.x + (currentBall.vx || 0) * dt;
     const predictedBallY = currentBall.y + (currentBall.vy || 0) * dt;
-    const serverBallX = target.ball.x + target.ball.vx * snapshotAge;
-    const serverBallY = target.ball.y + target.ball.vy * snapshotAge;
     const ballError = Math.hypot(serverBallX - predictedBallX, serverBallY - predictedBallY);
     const ballCorrectionRate = ballError > 90 ? 22 : 10;
     const ballCorrection = 1 - Math.exp(-ballCorrectionRate * dt);
@@ -595,17 +601,68 @@ function constrainRenderedBall(ball, state) {
     const isRight = state.lastGoalSide === "right";
     const front = isRight ? field.right : field.left;
     const back = front + (isRight ? goal.depth : -goal.depth);
-    ball.x = clamp(ball.x, Math.min(front, back) + ball.radius, Math.max(front, back) - ball.radius);
-    ball.y = clamp(ball.y, goal.top + ball.radius, goal.bottom - ball.radius);
+    reflectBallX(ball, Math.min(front, back) + ball.radius, Math.max(front, back) - ball.radius, 0.48);
+    reflectBallY(ball, goal.top + ball.radius, goal.bottom - ball.radius, 0.48);
     return;
   }
 
-  ball.y = clamp(ball.y, field.top + ball.radius, field.bottom - ball.radius);
+  reflectBallY(ball, field.top + ball.radius, field.bottom - ball.radius, 0.52);
   const inGoalMouth = ball.y > goal.top + ball.radius * 0.15 && ball.y < goal.bottom - ball.radius * 0.15;
   if (!inGoalMouth) {
-    ball.x = clamp(ball.x, field.left + ball.radius, field.right - ball.radius);
+    reflectBallX(ball, field.left + ball.radius, field.right - ball.radius, 0.52);
   } else {
-    ball.x = clamp(ball.x, field.left - ball.radius * 0.3, field.right + ball.radius * 0.3);
+    reflectBallX(
+      ball,
+      field.left - goal.depth + ball.radius,
+      field.right + goal.depth - ball.radius,
+      0.48,
+    );
+  }
+  resolveRenderedPost(ball, field.left, goal.top);
+  resolveRenderedPost(ball, field.left, goal.bottom);
+  resolveRenderedPost(ball, field.right, goal.top);
+  resolveRenderedPost(ball, field.right, goal.bottom);
+}
+
+function reflectBallX(ball, minimum, maximum, restitution) {
+  if (ball.x < minimum) {
+    ball.x = minimum;
+    if (ball.vx < 0) ball.vx = -ball.vx * restitution;
+  } else if (ball.x > maximum) {
+    ball.x = maximum;
+    if (ball.vx > 0) ball.vx = -ball.vx * restitution;
+  }
+}
+
+function reflectBallY(ball, minimum, maximum, restitution) {
+  if (ball.y < minimum) {
+    ball.y = minimum;
+    if (ball.vy < 0) ball.vy = -ball.vy * restitution;
+  } else if (ball.y > maximum) {
+    ball.y = maximum;
+    if (ball.vy > 0) ball.vy = -ball.vy * restitution;
+  }
+}
+
+function resolveRenderedPost(ball, x, y) {
+  let dx = ball.x - x;
+  let dy = ball.y - y;
+  let distance = Math.hypot(dx, dy);
+  const minimum = ball.radius + 8;
+  if (distance >= minimum) return;
+  if (distance < 0.001) {
+    dx = 1;
+    dy = 0;
+    distance = 1;
+  }
+  const nx = dx / distance;
+  const ny = dy / distance;
+  ball.x = x + nx * minimum;
+  ball.y = y + ny * minimum;
+  const velocity = ball.vx * nx + ball.vy * ny;
+  if (velocity < 0) {
+    ball.vx -= 1.82 * velocity * nx;
+    ball.vy -= 1.82 * velocity * ny;
   }
 }
 
