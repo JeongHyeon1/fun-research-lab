@@ -1,655 +1,556 @@
-const canvas = document.querySelector("#gameCanvas");
+import { WORLD } from "./shared/physics.js";
+
+const $ = (selector) => document.querySelector(selector);
+const canvas = $("#gameCanvas");
 const ctx = canvas.getContext("2d");
-const startButton = document.querySelector("#startButton");
-const startOverlay = document.querySelector("#startOverlay");
-const message = document.querySelector("#message");
-const blueScoreElement = document.querySelector("#blueScore");
-const redScoreElement = document.querySelector("#redScore");
-const timerElement = document.querySelector("#timer");
-const soundButton = document.querySelector("#soundButton");
+const lobbyView = $("#lobbyView");
+const gameView = $("#gameView");
+const roomList = $("#roomList");
+const createRoomForm = $("#createRoomForm");
+const createRoomButton = $("#createRoomButton");
+const nicknameInput = $("#nicknameInput");
+const roomNameInput = $("#roomNameInput");
+const durationSelect = $("#durationSelect");
+const refreshButton = $("#refreshButton");
+const leaveButton = $("#leaveButton");
+const soundButton = $("#soundButton");
+const waitingOverlay = $("#waitingOverlay");
+const waitingTitle = $("#waitingTitle");
+const waitingDescription = $("#waitingDescription");
+const roomModeLabel = $("#roomModeLabel");
+const roster = $("#roster");
+const blueScoreElement = $("#blueScore");
+const redScoreElement = $("#redScore");
+const timerElement = $("#timer");
+const messageElement = $("#message");
+const toastElement = $("#toast");
+const connectionDot = $("#connectionDot");
+const networkBadge = $("#networkBadge");
 
-const WIDTH = canvas.width;
-const HEIGHT = canvas.height;
-const field = { left: 90, right: 1190, top: 76, bottom: 644 };
-const goal = { top: 260, bottom: 460, depth: 58 };
-const PLAYER_RADIUS = 23;
-const BALL_RADIUS = 13;
-const MATCH_SECONDS = 120;
-const WIN_SCORE = 5;
-const PLAYER_LINE_MARGIN = 40;
-
+const API_BASE = String(window.FUTSAL_CONFIG?.apiBase || "http://localhost:8787").replace(/\/$/, "");
 const keys = new Set();
 const particles = [];
-let audioContext = null;
+const ballTrail = [];
+let socket = null;
+let playerId = null;
+let activeRoom = null;
+let latestSnapshot = null;
+let renderedState = null;
+let previousScores = { blue: 0, red: 0 };
+let previousStatus = "waiting";
+let inputSequence = 0;
+let manualClose = false;
+let reconnectStartedAt = 0;
 let soundEnabled = false;
-let lastTime = performance.now();
-let matchTime = MATCH_SECONDS;
-let gameState = "menu";
-let kickoffUntil = 0;
-let goalMoment = null;
-let shake = 0;
+let audioContext = null;
+let toastTimer = 0;
 let messageTimer = 0;
+let roomPollTimer = 0;
+let pingTimer = 0;
+let inputTimer = 0;
+let lastFrameAt = performance.now();
+let lastPingAt = 0;
+let roundTripMs = null;
 
-const teams = {
-  blue: { score: 0, color: "#24c8ff", dark: "#087ea3" },
-  red: { score: 0, color: "#ff416d", dark: "#a9153a" },
-};
+nicknameInput.value = localStorage.getItem("futsal-nickname") || `PLAYER-${Math.floor(1000 + Math.random() * 9000)}`;
 
-const players = [
-  createPlayer("blue", 355, HEIGHT / 2, {
-    up: "KeyW",
-    down: "KeyS",
-    left: "KeyA",
-    right: "KeyD",
-    kick: "Space",
-  }),
-  createPlayer("red", 925, HEIGHT / 2, {
-    up: "ArrowUp",
-    down: "ArrowDown",
-    left: "ArrowLeft",
-    right: "ArrowRight",
-    kick: "Enter",
-  }),
-];
+function saveNickname() {
+  const nickname = sanitizeText(nicknameInput.value, 16, "PLAYER");
+  nicknameInput.value = nickname;
+  localStorage.setItem("futsal-nickname", nickname);
+  return nickname;
+}
 
-const ball = {
-  x: WIDTH / 2,
-  y: HEIGHT / 2,
-  vx: 0,
-  vy: 0,
-  radius: BALL_RADIUS,
-  trail: [],
-};
+async function loadRooms(showLoading = false) {
+  if (showLoading) roomList.innerHTML = '<div class="room-empty">방 목록을 불러오는 중입니다.</div>';
+  try {
+    const response = await fetch(`${API_BASE}/api/rooms`, { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    renderRooms(data.rooms || []);
+    connectionDot.classList.add("online");
+  } catch (error) {
+    connectionDot.classList.remove("online");
+    roomList.innerHTML =
+      '<div class="room-empty">온라인 서버에 연결할 수 없습니다.<br />잠시 뒤 새로고침해주세요.</div>';
+    if (showLoading) showToast(`서버 연결 실패: ${error.message}`);
+  }
+}
 
-function createPlayer(team, x, y, controls) {
-  return {
-    team,
-    x,
-    y,
-    vx: 0,
-    vy: 0,
-    radius: PLAYER_RADIUS,
-    controls,
-    facingX: team === "blue" ? 1 : -1,
-    facingY: 0,
-    kickCooldown: 0,
-    kickFlash: 0,
+function renderRooms(rooms) {
+  roomList.replaceChildren();
+  if (!rooms.length) {
+    const empty = document.createElement("div");
+    empty.className = "room-empty";
+    empty.textContent = "열린 방이 없습니다. 첫 경기를 만들어보세요.";
+    roomList.append(empty);
+    return;
+  }
+
+  rooms.forEach((room) => {
+    const row = document.createElement("article");
+    row.className = "room-row";
+
+    const name = document.createElement("div");
+    name.className = "room-name";
+    const title = document.createElement("strong");
+    title.textContent = room.name;
+    const identifier = document.createElement("small");
+    identifier.textContent = `ROOM ${String(room.id).toUpperCase()}`;
+    name.append(title, identifier);
+
+    const mode = document.createElement("div");
+    mode.className = "room-meta";
+    mode.textContent = `${room.teamSize} v ${room.teamSize} · ${room.durationMinutes}분`;
+
+    const status = document.createElement("span");
+    status.className = `room-status ${room.status}`;
+    status.textContent = roomStatusLabel(room.status);
+
+    const join = document.createElement("button");
+    join.className = "join-button";
+    join.type = "button";
+    join.textContent = `${room.occupancy}/${room.capacity} 참가`;
+    join.disabled = room.status !== "waiting" || room.occupancy >= room.capacity;
+    join.addEventListener("click", () => joinRoom(room));
+
+    row.append(name, mode, status, join);
+    roomList.append(row);
+  });
+}
+
+async function createRoom(event) {
+  event.preventDefault();
+  createRoomButton.disabled = true;
+  const payload = {
+    roomName: sanitizeText(roomNameInput.value, 24, "빠른 경기"),
+    durationMinutes: Number(durationSelect.value),
+    teamSize: Number(createRoomForm.elements.teamSize.value),
   };
+
+  try {
+    const response = await fetch(`${API_BASE}/api/rooms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "방을 만들 수 없습니다.");
+    joinRoom(data.room);
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    createRoomButton.disabled = false;
+  }
 }
 
-function resetPositions() {
-  Object.assign(players[0], { x: 355, y: HEIGHT / 2, vx: 0, vy: 0, facingX: 1, facingY: 0 });
-  Object.assign(players[1], { x: 925, y: HEIGHT / 2, vx: 0, vy: 0, facingX: -1, facingY: 0 });
-  Object.assign(ball, { x: WIDTH / 2, y: HEIGHT / 2, vx: 0, vy: 0, trail: [] });
+function joinRoom(room, reconnect = false) {
+  if (socket && socket.readyState <= WebSocket.OPEN) socket.close();
+  activeRoom = room;
+  manualClose = false;
+  const nickname = saveNickname();
+  const tokenKey = `futsal-token:${room.id}`;
+  const token = reconnect ? sessionStorage.getItem(tokenKey) || "" : "";
+  const websocketBase = API_BASE.replace(/^http:/, "ws:").replace(/^https:/, "wss:");
+  const url =
+    `${websocketBase}/api/rooms/${encodeURIComponent(room.id)}/socket` +
+    `?name=${encodeURIComponent(nickname)}&token=${encodeURIComponent(token)}`;
+  socket = new WebSocket(url);
+
+  showGameView();
+  waitingOverlay.classList.remove("hidden");
+  waitingTitle.textContent = reconnect ? "재접속 중" : "방에 접속하는 중";
+  waitingDescription.textContent = room.name;
+  roomModeLabel.textContent = `${room.teamSize} v ${room.teamSize} // ${room.durationMinutes} MIN`;
+
+  socket.addEventListener("open", () => {
+    reconnectStartedAt = 0;
+    connectionDot.classList.add("online");
+    startNetworkTimers();
+  });
+
+  socket.addEventListener("message", (event) => {
+    let message;
+    try {
+      message = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+    handleServerMessage(message);
+  });
+
+  socket.addEventListener("close", (event) => {
+    stopNetworkTimers();
+    connectionDot.classList.remove("online");
+    if (manualClose) return;
+    if (event.code === 1000) {
+      returnToLobby();
+      return;
+    }
+    attemptReconnect();
+  });
+
+  socket.addEventListener("error", () => {
+    if (!reconnect) showToast("방 서버 연결에 실패했습니다.");
+  });
 }
 
-function startMatch() {
-  teams.blue.score = 0;
-  teams.red.score = 0;
-  matchTime = MATCH_SECONDS;
-  gameState = "playing";
-  goalMoment = null;
-  kickoffUntil = performance.now() + 650;
-  resetPositions();
-  updateHud();
-  startOverlay.classList.add("hidden");
-  showMessage("KICK OFF!", 750);
-  playTone(220, 0.08, "square", 0.035);
+function handleServerMessage(message) {
+  if (message.type === "welcome") {
+    playerId = message.playerId;
+    activeRoom = message.room;
+    sessionStorage.setItem(`futsal-token:${activeRoom.id}`, message.token);
+    applySnapshot(message.state, message.serverTime, true);
+    showToast(`${message.state.players.find((player) => player.id === playerId)?.team.toUpperCase()} 팀 참가 완료`);
+    return;
+  }
+  if (message.type === "state") {
+    applySnapshot(message.state, message.serverTime, message.immediate);
+    return;
+  }
+  if (message.type === "pong") {
+    roundTripMs = Math.max(0, Date.now() - Number(message.sentAt));
+    networkBadge.textContent = `PING ${roundTripMs} ms`;
+  }
 }
 
-function updateHud() {
-  blueScoreElement.textContent = teams.blue.score;
-  redScoreElement.textContent = teams.red.score;
-  const seconds = Math.max(0, Math.ceil(matchTime));
+function applySnapshot(state, serverTime, immediate = false) {
+  const receivedAt = performance.now();
+  latestSnapshot = { state, serverTime, receivedAt };
+  if (!renderedState || immediate) renderedState = cloneState(state);
+
+  if (state.scores.blue !== previousScores.blue || state.scores.red !== previousScores.red) {
+    const scoringTeam = state.scores.blue > previousScores.blue ? "blue" : "red";
+    createBurst(state.ball.x, state.ball.y, scoringTeam === "blue" ? "#24c8ff" : "#ff416d", 38);
+    showMessage(`${scoringTeam.toUpperCase()} GOAL!`, 1250);
+    playGoalSound();
+  }
+  if (state.status === "goldenGoal" && previousStatus !== "goldenGoal") {
+    showMessage("GOLDEN GOAL", 1800);
+    playTone(260, 0.28, "sawtooth", 0.035);
+  }
+  if (state.status === "ended" && previousStatus !== "ended") {
+    const team = state.winner?.toUpperCase() || "";
+    showMessage(`${team} WINS!`, 1800);
+    playTone(130, 0.35, "sawtooth", 0.025);
+  }
+
+  previousScores = { ...state.scores };
+  previousStatus = state.status;
+  updateMatchUi(state);
+}
+
+function updateMatchUi(state) {
+  blueScoreElement.textContent = state.scores.blue;
+  redScoreElement.textContent = state.scores.red;
+  updateTimer(state);
+  renderRoster(state);
+
+  const connected = state.players.filter((player) => player.connected).length;
+  const capacity = state.teamSize * 2;
+  roomModeLabel.textContent = `${state.teamSize} v ${state.teamSize} // ${state.durationMinutes} MIN`;
+
+  if (state.status === "waiting") {
+    waitingOverlay.classList.remove("hidden");
+    waitingTitle.textContent = "선수를 기다리는 중";
+    waitingDescription.textContent = `${connected}/${capacity}명 접속 · 모두 모이면 자동으로 시작합니다.`;
+  } else if (state.status === "countdown") {
+    waitingOverlay.classList.remove("hidden");
+    const count = Math.max(1, Math.ceil(state.countdownSeconds));
+    waitingTitle.textContent = count === 1 ? "KICK OFF!" : `${count}`;
+    waitingDescription.textContent = "곧 경기가 시작됩니다.";
+  } else if (state.status === "ended") {
+    waitingOverlay.classList.remove("hidden");
+    waitingTitle.textContent = `${state.winner?.toUpperCase() || ""} WINS`;
+    waitingDescription.textContent = endReasonText(state.winReason);
+  } else {
+    waitingOverlay.classList.add("hidden");
+  }
+}
+
+function updateTimer(state) {
+  if (state.goldenGoal && state.status !== "ended") {
+    timerElement.textContent = "GOLDEN GOAL";
+    timerElement.classList.add("golden");
+    return;
+  }
+  timerElement.classList.remove("golden");
+  let seconds = state.remainingSeconds;
+  if (state.status === "playing" && latestSnapshot) {
+    seconds -= (performance.now() - latestSnapshot.receivedAt) / 1000;
+  }
+  seconds = Math.max(0, Math.ceil(seconds));
   timerElement.textContent = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
-function showMessage(text, duration = 900) {
-  message.textContent = text;
-  message.classList.add("show");
-  clearTimeout(messageTimer);
-  messageTimer = setTimeout(() => message.classList.remove("show"), duration);
-}
-
-function scoreGoal(teamName) {
-  if (gameState !== "playing" || goalMoment) return;
-
-  const now = performance.now();
-  teams[teamName].score += 1;
-  goalMoment = {
-    team: teamName,
-    side: teamName === "blue" ? "right" : "left",
-    startedAt: now,
-    endAt: now + 1650,
-    winner: teams[teamName].score >= WIN_SCORE ? teamName : null,
-  };
-  updateHud();
-  shake = 24;
-  createBurst(ball.x, ball.y, teams[teamName].color, 46);
-  showMessage(`${teamName.toUpperCase()} GOAL!`, 1350);
-  playGoalSound();
-}
-
-function endMatch(winner = null) {
-  gameState = "ended";
-  kickoffUntil = Infinity;
-  goalMoment = null;
-  const winnerName =
-    winner ?? (teams.blue.score === teams.red.score ? "draw" : teams.blue.score > teams.red.score ? "blue" : "red");
-
-  if (winnerName === "draw") {
-    showEndOverlay("무승부!", "끝까지 팽팽했던 경기였습니다.");
-  } else {
-    showEndOverlay(`${winnerName.toUpperCase()} WINS!`, `${teams[winnerName].score}골로 경기를 가져갑니다.`);
-  }
-}
-
-function showEndOverlay(title, description) {
-  startOverlay.querySelector(".eyebrow").textContent = "FULL TIME";
-  startOverlay.querySelector("h2").textContent = title;
-  startOverlay.querySelector(".lead").textContent = description;
-  startButton.firstChild.textContent = "REMATCH ";
-  startOverlay.classList.remove("hidden");
-  playTone(130, 0.35, "sawtooth", 0.025);
-}
-
-function updatePlayer(player, dt) {
-  const c = player.controls;
-  let inputX = Number(keys.has(c.right)) - Number(keys.has(c.left));
-  let inputY = Number(keys.has(c.down)) - Number(keys.has(c.up));
-  const inputLength = Math.hypot(inputX, inputY);
-
-  if (inputLength) {
-    inputX /= inputLength;
-    inputY /= inputLength;
-    player.facingX = inputX;
-    player.facingY = inputY;
-  }
-
-  const acceleration = 1500;
-  player.vx += inputX * acceleration * dt;
-  player.vy += inputY * acceleration * dt;
-
-  const drag = Math.pow(inputLength ? 0.0008 : 0.00002, dt);
-  player.vx *= drag;
-  player.vy *= drag;
-
-  const speed = Math.hypot(player.vx, player.vy);
-  const maxSpeed = 330;
-  if (speed > maxSpeed) {
-    player.vx = (player.vx / speed) * maxSpeed;
-    player.vy = (player.vy / speed) * maxSpeed;
-  }
-
-  player.x += player.vx * dt;
-  player.y += player.vy * dt;
-  constrainPlayer(player);
-  player.kickCooldown = Math.max(0, player.kickCooldown - dt);
-  player.kickFlash = Math.max(0, player.kickFlash - dt);
-
-  if (keys.has(c.kick) && player.kickCooldown <= 0) {
-    kickBall(player);
-  }
-}
-
-function constrainPlayer(player) {
-  player.x = Math.max(
-    field.left - PLAYER_LINE_MARGIN,
-    Math.min(field.right + PLAYER_LINE_MARGIN, player.x),
-  );
-  player.y = Math.max(
-    field.top - PLAYER_LINE_MARGIN,
-    Math.min(field.bottom + PLAYER_LINE_MARGIN, player.y),
-  );
-
-  constrainPlayerInGoal(player, field.left, -1);
-  constrainPlayerInGoal(player, field.right, 1);
-  resolvePlayerPost(player, field.left, goal.top);
-  resolvePlayerPost(player, field.left, goal.bottom);
-  resolvePlayerPost(player, field.right, goal.top);
-  resolvePlayerPost(player, field.right, goal.bottom);
-}
-
-function constrainPlayerInGoal(player, front, direction) {
-  const behindGoalLine = direction < 0 ? player.x < front : player.x > front;
-  const insideGoalMouth = player.y > goal.top && player.y < goal.bottom;
-  if (!behindGoalLine || !insideGoalMouth) return;
-
-  const back = front + goal.depth * direction;
-  if (direction < 0) {
-    player.x = Math.max(back + player.radius, player.x);
-  } else {
-    player.x = Math.min(back - player.radius, player.x);
-  }
-  player.y = Math.max(goal.top + player.radius, Math.min(goal.bottom - player.radius, player.y));
-}
-
-function resolvePlayerPost(player, x, y) {
-  const postRadius = 8;
-  const dx = player.x - x;
-  const dy = player.y - y;
-  const distance = Math.hypot(dx, dy);
-  const minDistance = player.radius + postRadius;
-  if (distance >= minDistance || distance === 0) return;
-
-  const nx = dx / distance;
-  const ny = dy / distance;
-  player.x = x + nx * minDistance;
-  player.y = y + ny * minDistance;
-
-  const inwardSpeed = player.vx * nx + player.vy * ny;
-  if (inwardSpeed < 0) {
-    player.vx -= inwardSpeed * nx;
-    player.vy -= inwardSpeed * ny;
-  }
-}
-
-function kickBall(player) {
-  player.kickCooldown = 0.42;
-  const dx = ball.x - player.x;
-  const dy = ball.y - player.y;
-  const distance = Math.hypot(dx, dy);
-  const kickRange = player.radius + ball.radius + 24;
-
-  if (distance > kickRange) {
-    playTone(85, 0.025, "square", 0.008);
-    return;
-  }
-
-  const nx = distance > 0 ? dx / distance : player.facingX;
-  const ny = distance > 0 ? dy / distance : player.facingY;
-  const aimX = nx * 0.65 + player.facingX * 0.35;
-  const aimY = ny * 0.65 + player.facingY * 0.35;
-  const aimLength = Math.hypot(aimX, aimY) || 1;
-  const power = 610;
-
-  ball.vx = (aimX / aimLength) * power + player.vx * 0.22;
-  ball.vy = (aimY / aimLength) * power + player.vy * 0.22;
-  player.kickFlash = 0.15;
-  shake = Math.max(shake, 4);
-  createBurst(ball.x, ball.y, teams[player.team].color, 8);
-  playTone(105, 0.07, "triangle", 0.05);
-}
-
-function resolvePlayerCollision(a, b) {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const distance = Math.hypot(dx, dy);
-  const minDistance = a.radius + b.radius;
-  if (distance >= minDistance || distance === 0) return;
-
-  const nx = dx / distance;
-  const ny = dy / distance;
-  const overlap = minDistance - distance;
-  a.x -= nx * overlap * 0.5;
-  a.y -= ny * overlap * 0.5;
-  b.x += nx * overlap * 0.5;
-  b.y += ny * overlap * 0.5;
-
-  const relativeVelocity = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
-  if (relativeVelocity < 0) {
-    const impulse = relativeVelocity * 0.42;
-    a.vx += nx * impulse;
-    a.vy += ny * impulse;
-    b.vx -= nx * impulse;
-    b.vy -= ny * impulse;
-  }
-}
-
-function resolveBallPlayerCollision(player) {
-  const dx = ball.x - player.x;
-  const dy = ball.y - player.y;
-  const distance = Math.hypot(dx, dy);
-  const minDistance = ball.radius + player.radius;
-  if (distance >= minDistance || distance === 0) return;
-
-  const nx = dx / distance;
-  const ny = dy / distance;
-  const overlap = minDistance - distance;
-  ball.x += nx * overlap;
-  ball.y += ny * overlap;
-
-  const relativeVelocity = (ball.vx - player.vx) * nx + (ball.vy - player.vy) * ny;
-  if (relativeVelocity < 0) {
-    const impulse = -relativeVelocity * 1.42;
-    ball.vx += nx * impulse + player.vx * 0.08;
-    ball.vy += ny * impulse + player.vy * 0.08;
-  }
-}
-
-function updateBall(dt) {
-  ball.x += ball.vx * dt;
-  ball.y += ball.vy * dt;
-  const drag = Math.pow(0.42, dt);
-  ball.vx *= drag;
-  ball.vy *= drag;
-
-  const speed = Math.hypot(ball.vx, ball.vy);
-  if (speed > 90) {
-    ball.trail.unshift({ x: ball.x, y: ball.y, life: Math.min(1, speed / 700) });
-    if (ball.trail.length > 11) ball.trail.pop();
-  } else if (ball.trail.length) {
-    ball.trail.pop();
-  }
-
-  if (goalMoment) {
-    updateBallInNet();
-    return;
-  }
-
-  const inGoalMouth = ball.y > goal.top + ball.radius * 0.15 && ball.y < goal.bottom - ball.radius * 0.15;
-
-  if (ball.y - ball.radius < field.top) {
-    ball.y = field.top + ball.radius;
-    ball.vy = Math.abs(ball.vy) * 0.84;
-    wallHit();
-  } else if (ball.y + ball.radius > field.bottom) {
-    ball.y = field.bottom - ball.radius;
-    ball.vy = -Math.abs(ball.vy) * 0.84;
-    wallHit();
-  }
-
-  if (!inGoalMouth) {
-    if (ball.x - ball.radius < field.left) {
-      ball.x = field.left + ball.radius;
-      ball.vx = Math.abs(ball.vx) * 0.84;
-      wallHit();
-    } else if (ball.x + ball.radius > field.right) {
-      ball.x = field.right - ball.radius;
-      ball.vx = -Math.abs(ball.vx) * 0.84;
-      wallHit();
+function renderRoster(state) {
+  roster.replaceChildren();
+  for (const team of ["blue", "red"]) {
+    const box = document.createElement("div");
+    box.className = `roster-team ${team}`;
+    const heading = document.createElement("span");
+    heading.textContent = `${team.toUpperCase()} TEAM`;
+    box.append(heading);
+    for (let slot = 0; slot < state.teamSize; slot += 1) {
+      const player = state.players.find((entry) => entry.team === team && entry.slot === slot);
+      const line = document.createElement("div");
+      line.className = `roster-player ${player?.id === playerId ? "me" : ""}`;
+      const name = document.createElement("span");
+      name.textContent = player ? player.name : "빈 자리";
+      const status = document.createElement("small");
+      status.textContent = player ? (player.connected ? "READY" : "RECONNECT") : "WAIT";
+      line.append(name, status);
+      box.append(line);
     }
-  } else {
-    if (ball.x < field.left - ball.radius * 0.3) scoreGoal("red");
-    if (ball.x > field.right + ball.radius * 0.3) scoreGoal("blue");
-  }
-
-  resolvePost(field.left, goal.top);
-  resolvePost(field.left, goal.bottom);
-  resolvePost(field.right, goal.top);
-  resolvePost(field.right, goal.bottom);
-}
-
-function updateBallInNet() {
-  const isRight = goalMoment.side === "right";
-  const front = isRight ? field.right : field.left;
-  const back = front + (isRight ? goal.depth : -goal.depth);
-  const minX = Math.min(front, back) + ball.radius;
-  const maxX = Math.max(front, back) - ball.radius;
-  let netHit = false;
-
-  if (ball.x < minX) {
-    ball.x = minX;
-    ball.vx = Math.abs(ball.vx) * 0.56;
-    netHit = true;
-  } else if (ball.x > maxX) {
-    ball.x = maxX;
-    ball.vx = -Math.abs(ball.vx) * 0.56;
-    netHit = true;
-  }
-
-  if (ball.y - ball.radius < goal.top) {
-    ball.y = goal.top + ball.radius;
-    ball.vy = Math.abs(ball.vy) * 0.56;
-    netHit = true;
-  } else if (ball.y + ball.radius > goal.bottom) {
-    ball.y = goal.bottom - ball.radius;
-    ball.vy = -Math.abs(ball.vy) * 0.56;
-    netHit = true;
-  }
-
-  if (netHit) {
-    createBurst(ball.x, ball.y, "rgba(235, 255, 240, 0.7)", 3);
-    shake = Math.max(shake, 4);
-    playTone(72, 0.035, "triangle", 0.016);
+    roster.append(box);
   }
 }
 
-function resolvePost(x, y) {
-  const postRadius = 8;
-  const dx = ball.x - x;
-  const dy = ball.y - y;
-  const distance = Math.hypot(dx, dy);
-  const minDistance = ball.radius + postRadius;
-  if (distance >= minDistance || distance === 0) return;
-
-  const nx = dx / distance;
-  const ny = dy / distance;
-  ball.x = x + nx * minDistance;
-  ball.y = y + ny * minDistance;
-  const dot = ball.vx * nx + ball.vy * ny;
-  if (dot < 0) {
-    ball.vx -= 1.85 * dot * nx;
-    ball.vy -= 1.85 * dot * ny;
-    wallHit(true);
-  }
+function showGameView() {
+  lobbyView.classList.add("hidden");
+  gameView.classList.remove("hidden");
+  leaveButton.classList.remove("hidden");
+  clearInterval(roomPollTimer);
 }
 
-function wallHit(post = false) {
-  const speed = Math.hypot(ball.vx, ball.vy);
-  if (speed > 180) {
-    shake = Math.max(shake, post ? 5 : 2);
-    playTone(post ? 210 : 155, 0.025, "square", Math.min(0.025, speed / 35000));
-  }
+function leaveRoom() {
+  manualClose = true;
+  if (socket) socket.close(1000, "Player left");
+  socket = null;
+  returnToLobby();
 }
 
-function updateParticles(dt) {
-  for (let i = particles.length - 1; i >= 0; i -= 1) {
-    const particle = particles[i];
-    particle.x += particle.vx * dt;
-    particle.y += particle.vy * dt;
-    particle.vx *= Math.pow(0.12, dt);
-    particle.vy *= Math.pow(0.12, dt);
-    particle.life -= dt * 1.8;
-    if (particle.life <= 0) particles.splice(i, 1);
-  }
+function returnToLobby() {
+  manualClose = true;
+  stopNetworkTimers();
+  socket = null;
+  activeRoom = null;
+  playerId = null;
+  latestSnapshot = null;
+  renderedState = null;
+  previousScores = { blue: 0, red: 0 };
+  previousStatus = "waiting";
+  keys.clear();
+  lobbyView.classList.remove("hidden");
+  gameView.classList.add("hidden");
+  leaveButton.classList.add("hidden");
+  loadRooms(true);
+  roomPollTimer = setInterval(loadRooms, 2500);
 }
 
-function createBurst(x, y, color, count) {
-  for (let i = 0; i < count; i += 1) {
-    const angle = Math.random() * Math.PI * 2;
-    const speed = 70 + Math.random() * 320;
-    particles.push({
-      x,
-      y,
-      vx: Math.cos(angle) * speed,
-      vy: Math.sin(angle) * speed,
-      life: 0.45 + Math.random() * 0.55,
-      size: 2 + Math.random() * 4,
-      color,
-    });
+function attemptReconnect() {
+  if (!activeRoom) returnToLobby();
+  if (!reconnectStartedAt) reconnectStartedAt = Date.now();
+  if (Date.now() - reconnectStartedAt > 14_000) {
+    showToast("재접속 시간이 만료됐습니다.");
+    returnToLobby();
+    return;
   }
+  waitingOverlay.classList.remove("hidden");
+  waitingTitle.textContent = "연결 복구 중";
+  waitingDescription.textContent = "잠시만 기다려주세요.";
+  setTimeout(() => {
+    if (!manualClose && activeRoom) joinRoom(activeRoom, true);
+  }, 1100);
 }
 
-function update(dt, now) {
+function startNetworkTimers() {
+  stopNetworkTimers();
+  inputTimer = setInterval(sendInput, 33);
+  pingTimer = setInterval(() => {
+    if (socket?.readyState !== WebSocket.OPEN) return;
+    lastPingAt = Date.now();
+    socket.send(JSON.stringify({ type: "ping", sentAt: lastPingAt }));
+  }, 2000);
+}
+
+function stopNetworkTimers() {
+  clearInterval(inputTimer);
+  clearInterval(pingTimer);
+  inputTimer = 0;
+  pingTimer = 0;
+}
+
+function sendInput() {
+  if (socket?.readyState !== WebSocket.OPEN) return;
+  inputSequence += 1;
+  socket.send(
+    JSON.stringify({
+      type: "input",
+      input: {
+        up: keys.has("ArrowUp"),
+        down: keys.has("ArrowDown"),
+        left: keys.has("ArrowLeft"),
+        right: keys.has("ArrowRight"),
+        kick:
+          keys.has("KeyX") ||
+          keys.has("ControlLeft") ||
+          keys.has("ControlRight") ||
+          keys.has("Space"),
+        sequence: inputSequence,
+      },
+    }),
+  );
+}
+
+function animate(now) {
+  const dt = Math.min((now - lastFrameAt) / 1000, 1 / 30);
+  lastFrameAt = now;
   updateParticles(dt);
-  if (gameState !== "playing") return;
+  smoothRenderedState(dt);
+  draw();
+  if (latestSnapshot) updateTimer(latestSnapshot.state);
+  requestAnimationFrame(animate);
+}
 
-  if (goalMoment) {
-    players.forEach((player) => updatePlayer(player, dt));
-    resolvePlayerCollision(players[0], players[1]);
-    players.forEach(constrainPlayer);
-    players.forEach(resolveBallPlayerCollision);
-    updateBall(dt);
-
-    if (now >= goalMoment.endAt) {
-      const winner = goalMoment.winner;
-      goalMoment = null;
-      if (winner) {
-        endMatch(winner);
-      } else {
-        resetPositions();
-        kickoffUntil = now + 500;
-        showMessage("PLAY!", 480);
-      }
-    }
+function smoothRenderedState(dt) {
+  if (!latestSnapshot?.state) return;
+  const target = latestSnapshot.state;
+  if (!renderedState) {
+    renderedState = cloneState(target);
     return;
   }
+  renderedState.status = target.status;
+  renderedState.goldenGoal = target.goldenGoal;
+  renderedState.scores = target.scores;
+  renderedState.players = target.players.map((player) => {
+    const current = renderedState.players.find((entry) => entry.id === player.id) || player;
+    const blend = 1 - Math.exp(-20 * dt);
+    return {
+      ...player,
+      x: lerp(current.x, player.x, blend),
+      y: lerp(current.y, player.y, blend),
+      vx: player.vx,
+      vy: player.vy,
+    };
+  });
+  const ballBlend = 1 - Math.exp(-24 * dt);
+  renderedState.ball = {
+    ...target.ball,
+    x: lerp(renderedState.ball.x, target.ball.x, ballBlend),
+    y: lerp(renderedState.ball.y, target.ball.y, ballBlend),
+  };
 
-  if (now < kickoffUntil) return;
-
-  matchTime -= dt;
-  if (matchTime <= 0) {
-    matchTime = 0;
-    updateHud();
-    endMatch();
-    return;
+  const speed = Math.hypot(target.ball.vx, target.ball.vy);
+  if (speed > 80) {
+    ballTrail.unshift({ x: renderedState.ball.x, y: renderedState.ball.y, life: Math.min(1, speed / 600) });
+    if (ballTrail.length > 12) ballTrail.pop();
+  } else if (ballTrail.length) {
+    ballTrail.pop();
   }
-
-  players.forEach((player) => updatePlayer(player, dt));
-  resolvePlayerCollision(players[0], players[1]);
-  players.forEach(constrainPlayer);
-  players.forEach(resolveBallPlayerCollision);
-  updateBall(dt);
-  updateHud();
 }
 
 function draw() {
-  ctx.clearRect(0, 0, WIDTH, HEIGHT);
-  ctx.save();
-
-  if (shake > 0.2) {
-    ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
-    shake *= 0.88;
-  } else {
-    shake = 0;
-  }
-
+  ctx.clearRect(0, 0, WORLD.width, WORLD.height);
   drawBackground();
   drawGoals();
   drawField();
+  if (!renderedState) return;
   drawBallTrail();
-  players.forEach(drawPlayer);
-  drawBall();
+  renderedState.players.forEach((player) => drawPlayer(predictedPlayer(player), player.id === playerId));
+  drawBall(renderedState.ball);
   drawParticles();
-  ctx.restore();
+}
+
+function predictedPlayer(player) {
+  if (player.id !== playerId || !latestSnapshot) return player;
+  const age = Math.min(0.08, (performance.now() - latestSnapshot.receivedAt) / 1000);
+  let x = Number(keys.has("ArrowRight")) - Number(keys.has("ArrowLeft"));
+  let y = Number(keys.has("ArrowDown")) - Number(keys.has("ArrowUp"));
+  const length = Math.hypot(x, y);
+  if (length) {
+    x /= length;
+    y /= length;
+  }
+  return { ...player, x: player.x + x * 230 * age, y: player.y + y * 230 * age };
 }
 
 function drawBackground() {
-  const gradient = ctx.createLinearGradient(0, 0, WIDTH, HEIGHT);
+  const gradient = ctx.createLinearGradient(0, 0, WORLD.width, WORLD.height);
   gradient.addColorStop(0, "#07121a");
   gradient.addColorStop(0.5, "#0b1115");
   gradient.addColorStop(1, "#160a10");
   ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, WIDTH, HEIGHT);
-
+  ctx.fillRect(0, 0, WORLD.width, WORLD.height);
   ctx.strokeStyle = "rgba(255,255,255,0.018)";
-  ctx.lineWidth = 1;
-  for (let x = 0; x <= WIDTH; x += 32) {
+  for (let x = 0; x <= WORLD.width; x += 32) {
     ctx.beginPath();
     ctx.moveTo(x, 0);
-    ctx.lineTo(x, HEIGHT);
+    ctx.lineTo(x, WORLD.height);
     ctx.stroke();
   }
-  for (let y = 0; y <= HEIGHT; y += 32) {
+  for (let y = 0; y <= WORLD.height; y += 32) {
     ctx.beginPath();
     ctx.moveTo(0, y);
-    ctx.lineTo(WIDTH, y);
+    ctx.lineTo(WORLD.width, y);
     ctx.stroke();
   }
 }
 
 function drawField() {
-  const pitchGradient = ctx.createLinearGradient(field.left, 0, field.right, 0);
-  pitchGradient.addColorStop(0, "rgba(20, 61, 68, 0.78)");
-  pitchGradient.addColorStop(0.5, "rgba(21, 48, 47, 0.78)");
-  pitchGradient.addColorStop(1, "rgba(63, 29, 42, 0.74)");
-  ctx.fillStyle = pitchGradient;
+  const { field } = WORLD;
+  const gradient = ctx.createLinearGradient(field.left, 0, field.right, 0);
+  gradient.addColorStop(0, "rgba(20, 61, 68, 0.78)");
+  gradient.addColorStop(0.5, "rgba(21, 48, 47, 0.78)");
+  gradient.addColorStop(1, "rgba(63, 29, 42, 0.74)");
+  ctx.fillStyle = gradient;
   ctx.fillRect(field.left, field.top, field.right - field.left, field.bottom - field.top);
 
-  for (let x = field.left; x < field.right; x += 110) {
-    ctx.fillStyle = x / 110 % 2 < 1 ? "rgba(255,255,255,0.012)" : "rgba(0,0,0,0.018)";
-    ctx.fillRect(x, field.top, 110, field.bottom - field.top);
-  }
-
-  ctx.strokeStyle = "rgba(217, 255, 227, 0.46)";
+  ctx.strokeStyle = "rgba(217,255,227,0.46)";
   ctx.lineWidth = 3;
   ctx.strokeRect(field.left, field.top, field.right - field.left, field.bottom - field.top);
-
   ctx.beginPath();
-  ctx.moveTo(WIDTH / 2, field.top);
-  ctx.lineTo(WIDTH / 2, field.bottom);
+  ctx.moveTo(WORLD.width / 2, field.top);
+  ctx.lineTo(WORLD.width / 2, field.bottom);
   ctx.stroke();
-
   ctx.beginPath();
-  ctx.arc(WIDTH / 2, HEIGHT / 2, 84, 0, Math.PI * 2);
+  ctx.arc(WORLD.width / 2, WORLD.height / 2, 84, 0, Math.PI * 2);
   ctx.stroke();
-
   ctx.fillStyle = "rgba(217,255,227,0.58)";
   ctx.beginPath();
-  ctx.arc(WIDTH / 2, HEIGHT / 2, 4, 0, Math.PI * 2);
+  ctx.arc(WORLD.width / 2, WORLD.height / 2, 4, 0, Math.PI * 2);
   ctx.fill();
-
   drawPenaltyArea(field.left, 1);
   drawPenaltyArea(field.right, -1);
-  drawCornerMarks();
 }
 
 function drawPenaltyArea(x, direction) {
-  ctx.strokeStyle = "rgba(217, 255, 227, 0.38)";
+  ctx.strokeStyle = "rgba(217,255,227,0.38)";
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.arc(x, HEIGHT / 2, 137, -Math.PI / 2, Math.PI / 2, direction < 0);
+  ctx.arc(x, WORLD.height / 2, 137, -Math.PI / 2, Math.PI / 2, direction < 0);
   ctx.stroke();
-
   ctx.fillStyle = "rgba(217,255,227,0.48)";
   ctx.beginPath();
-  ctx.arc(x + direction * 92, HEIGHT / 2, 3.5, 0, Math.PI * 2);
+  ctx.arc(x + direction * 92, WORLD.height / 2, 3.5, 0, Math.PI * 2);
   ctx.fill();
 }
 
-function drawCornerMarks() {
-  ctx.strokeStyle = "rgba(217, 255, 227, 0.26)";
-  ctx.lineWidth = 2;
-  const corners = [
-    [field.left, field.top, 0, Math.PI / 2],
-    [field.right, field.top, Math.PI / 2, Math.PI],
-    [field.left, field.bottom, -Math.PI / 2, 0],
-    [field.right, field.bottom, Math.PI, Math.PI * 1.5],
-  ];
-  corners.forEach(([x, y, start, end]) => {
-    ctx.beginPath();
-    ctx.arc(x, y, 26, start, end);
-    ctx.stroke();
-  });
-}
-
 function drawGoals() {
-  drawGoal(field.left, -1, teams.red.color, goalMoment?.side === "left");
-  drawGoal(field.right, 1, teams.blue.color, goalMoment?.side === "right");
+  drawGoal(WORLD.field.left, -1, "#ff416d");
+  drawGoal(WORLD.field.right, 1, "#24c8ff");
 }
 
-function drawGoal(x, direction, glowColor, active) {
-  const back = x + goal.depth * direction;
-  const elapsed = active ? (performance.now() - goalMoment.startedAt) / 1000 : 0;
-  const pulse = active ? Math.max(0, 1 - elapsed / 1.65) : 0;
-  const ripple = Math.sin(elapsed * 24) * 7 * pulse;
+function drawGoal(x, direction, color) {
+  const back = x + WORLD.goal.depth * direction;
   ctx.save();
-  ctx.strokeStyle = "rgba(230, 241, 242, 0.32)";
+  ctx.strokeStyle = "rgba(230,241,242,0.32)";
+  ctx.fillStyle = "rgba(255,255,255,0.025)";
   ctx.lineWidth = 2;
-  ctx.fillStyle = active ? `${glowColor}22` : "rgba(255,255,255,0.025)";
-  ctx.fillRect(Math.min(x, back), goal.top, goal.depth, goal.bottom - goal.top);
-  ctx.strokeRect(Math.min(x, back), goal.top, goal.depth, goal.bottom - goal.top);
-
-  ctx.strokeStyle = active ? `${glowColor}70` : "rgba(220,230,232,0.09)";
+  ctx.fillRect(Math.min(x, back), WORLD.goal.top, WORLD.goal.depth, WORLD.goal.bottom - WORLD.goal.top);
+  ctx.strokeRect(Math.min(x, back), WORLD.goal.top, WORLD.goal.depth, WORLD.goal.bottom - WORLD.goal.top);
+  ctx.strokeStyle = "rgba(220,230,232,0.1)";
   ctx.lineWidth = 1;
-  for (let y = goal.top + 18; y < goal.bottom; y += 18) {
+  for (let y = WORLD.goal.top + 18; y < WORLD.goal.bottom; y += 18) {
     ctx.beginPath();
     ctx.moveTo(Math.min(x, back), y);
-    ctx.quadraticCurveTo(x + direction * goal.depth * 0.55, y + ripple, Math.max(x, back), y);
+    ctx.lineTo(Math.max(x, back), y);
     ctx.stroke();
   }
-  for (let offset = 12; offset < goal.depth; offset += 12) {
-    ctx.beginPath();
-    ctx.moveTo(x + offset * direction, goal.top);
-    ctx.quadraticCurveTo(x + offset * direction + ripple * direction, HEIGHT / 2, x + offset * direction, goal.bottom);
-    ctx.stroke();
-  }
-
-  ctx.shadowColor = glowColor;
+  ctx.shadowColor = color;
   ctx.shadowBlur = 11;
   ctx.fillStyle = "#e9f4f3";
-  for (const y of [goal.top, goal.bottom]) {
+  for (const y of [WORLD.goal.top, WORLD.goal.bottom]) {
     ctx.beginPath();
     ctx.arc(x, y, 8, 0, Math.PI * 2);
     ctx.fill();
@@ -657,51 +558,50 @@ function drawGoal(x, direction, glowColor, active) {
   ctx.restore();
 }
 
-function drawPlayer(player) {
-  const team = teams[player.team];
+function drawPlayer(player, isLocal) {
+  const color = player.team === "blue" ? "#24c8ff" : "#ff416d";
+  const dark = player.team === "blue" ? "#087ea3" : "#a9153a";
   ctx.save();
   ctx.translate(player.x, player.y);
-
   ctx.fillStyle = "rgba(0,0,0,0.38)";
   ctx.beginPath();
   ctx.ellipse(3, 9, player.radius + 7, player.radius - 4, 0, 0, Math.PI * 2);
   ctx.fill();
-
-  ctx.shadowColor = team.color;
-  ctx.shadowBlur = player.kickFlash > 0 ? 30 : 15;
+  if (isLocal) {
+    ctx.strokeStyle = "#d9ff43";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, 0, player.radius + 7, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.shadowColor = color;
+  ctx.shadowBlur = player.kickFlash > 0 ? 28 : 14;
   const gradient = ctx.createRadialGradient(-8, -10, 3, 0, 0, player.radius);
-  gradient.addColorStop(0, "#ffffff");
-  gradient.addColorStop(0.14, team.color);
-  gradient.addColorStop(1, team.dark);
+  gradient.addColorStop(0, "#fff");
+  gradient.addColorStop(0.14, color);
+  gradient.addColorStop(1, dark);
   ctx.fillStyle = gradient;
   ctx.beginPath();
   ctx.arc(0, 0, player.radius, 0, Math.PI * 2);
   ctx.fill();
-
   ctx.shadowBlur = 0;
   ctx.strokeStyle = "rgba(255,255,255,0.8)";
   ctx.lineWidth = 2;
   ctx.stroke();
-
   ctx.rotate(Math.atan2(player.facingY, player.facingX));
   ctx.fillStyle = "#f6ffff";
   ctx.beginPath();
   ctx.arc(player.radius * 0.55, 0, 4.5, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
+
+  ctx.fillStyle = isLocal ? "#d9ff43" : "rgba(240,246,247,0.82)";
+  ctx.font = "700 10px Space Mono, monospace";
+  ctx.textAlign = "center";
+  ctx.fillText(player.name, player.x, player.y - player.radius - 13);
 }
 
-function drawBallTrail() {
-  ball.trail.forEach((point, index) => {
-    const ratio = 1 - index / ball.trail.length;
-    ctx.fillStyle = `rgba(217, 255, 67, ${ratio * 0.12 * point.life})`;
-    ctx.beginPath();
-    ctx.arc(point.x, point.y, ball.radius * ratio, 0, Math.PI * 2);
-    ctx.fill();
-  });
-}
-
-function drawBall() {
+function drawBall(ball) {
   ctx.save();
   ctx.translate(ball.x, ball.y);
   ctx.shadowColor = "#d9ff43";
@@ -721,6 +621,44 @@ function drawBall() {
   ctx.restore();
 }
 
+function drawBallTrail() {
+  ballTrail.forEach((point, index) => {
+    const ratio = 1 - index / ballTrail.length;
+    ctx.fillStyle = `rgba(217,255,67,${ratio * 0.12 * point.life})`;
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, WORLD.ballRadius * ratio, 0, Math.PI * 2);
+    ctx.fill();
+  });
+}
+
+function createBurst(x, y, color, count) {
+  for (let i = 0; i < count; i += 1) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 70 + Math.random() * 300;
+    particles.push({
+      x,
+      y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 0.45 + Math.random() * 0.55,
+      size: 2 + Math.random() * 4,
+      color,
+    });
+  }
+}
+
+function updateParticles(dt) {
+  for (let i = particles.length - 1; i >= 0; i -= 1) {
+    const particle = particles[i];
+    particle.x += particle.vx * dt;
+    particle.y += particle.vy * dt;
+    particle.vx *= Math.pow(0.12, dt);
+    particle.vy *= Math.pow(0.12, dt);
+    particle.life -= dt * 1.8;
+    if (particle.life <= 0) particles.splice(i, 1);
+  }
+}
+
 function drawParticles() {
   particles.forEach((particle) => {
     ctx.globalAlpha = Math.max(0, particle.life);
@@ -728,6 +666,14 @@ function drawParticles() {
     ctx.fillRect(particle.x, particle.y, particle.size, particle.size);
   });
   ctx.globalAlpha = 1;
+}
+
+function toggleSound() {
+  soundEnabled = !soundEnabled;
+  if (soundEnabled && !audioContext) audioContext = new AudioContext();
+  soundButton.textContent = soundEnabled ? "SOUND ON" : "SOUND OFF";
+  soundButton.classList.toggle("active", soundEnabled);
+  playTone(440, 0.06, "square", 0.025);
 }
 
 function playTone(frequency, duration, type = "sine", volume = 0.03, delay = 0) {
@@ -746,42 +692,69 @@ function playTone(frequency, duration, type = "sine", volume = 0.03, delay = 0) 
 }
 
 function playGoalSound() {
-  [220, 330, 440, 660].forEach((frequency, index) => {
-    playTone(frequency, 0.2, "square", 0.025, index * 0.07);
-  });
+  [220, 330, 440, 660].forEach((frequency, index) => playTone(frequency, 0.2, "square", 0.025, index * 0.07));
 }
 
-function toggleSound() {
-  soundEnabled = !soundEnabled;
-  if (soundEnabled && !audioContext) {
-    audioContext = new AudioContext();
-  }
-  soundButton.textContent = soundEnabled ? "SOUND ON" : "SOUND OFF";
-  soundButton.classList.toggle("active", soundEnabled);
-  soundButton.setAttribute("aria-label", soundEnabled ? "소리 끄기" : "소리 켜기");
-  playTone(440, 0.06, "square", 0.025);
+function showMessage(text, duration = 900) {
+  messageElement.textContent = text;
+  messageElement.classList.add("show");
+  clearTimeout(messageTimer);
+  messageTimer = setTimeout(() => messageElement.classList.remove("show"), duration);
 }
 
-function loop(now) {
-  const dt = Math.min((now - lastTime) / 1000, 1 / 30);
-  lastTime = now;
-  update(dt, now);
-  draw();
-  requestAnimationFrame(loop);
+function showToast(text) {
+  toastElement.textContent = text;
+  toastElement.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastElement.classList.remove("show"), 2600);
+}
+
+function roomStatusLabel(status) {
+  return {
+    waiting: "WAITING",
+    countdown: "STARTING",
+    playing: "PLAYING",
+    goldenGoal: "GOLDEN GOAL",
+    ended: "ENDED",
+  }[status] || String(status).toUpperCase();
+}
+
+function endReasonText(reason) {
+  return {
+    regulation: "정규시간 승리",
+    "golden-goal": "골든골 승리",
+    disconnect: "상대 연결 종료로 승리",
+    forfeit: "상대 포기로 승리",
+  }[reason] || "경기가 종료됐습니다.";
+}
+
+function sanitizeText(value, maximum, fallback) {
+  const safe = String(value ?? "").replace(/[<>&"'`\\]/g, "").trim().slice(0, maximum);
+  return safe || fallback;
+}
+
+function cloneState(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function lerp(from, to, amount) {
+  return from + (to - from) * amount;
 }
 
 window.addEventListener("keydown", (event) => {
-  if (["Space", "Enter", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.code)) {
+  if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "KeyX", "ControlLeft", "ControlRight", "Space"].includes(event.code)) {
     event.preventDefault();
+    keys.add(event.code);
   }
-  keys.add(event.code);
-  if (event.code === "KeyR" && gameState !== "menu") startMatch();
 });
-
 window.addEventListener("keyup", (event) => keys.delete(event.code));
 window.addEventListener("blur", () => keys.clear());
-startButton.addEventListener("click", startMatch);
+createRoomForm.addEventListener("submit", createRoom);
+refreshButton.addEventListener("click", () => loadRooms(true));
+leaveButton.addEventListener("click", leaveRoom);
 soundButton.addEventListener("click", toggleSound);
+nicknameInput.addEventListener("change", saveNickname);
 
-updateHud();
-requestAnimationFrame(loop);
+loadRooms(true);
+roomPollTimer = setInterval(loadRooms, 2500);
+requestAnimationFrame(animate);

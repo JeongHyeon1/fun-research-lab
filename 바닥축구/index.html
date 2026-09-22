@@ -3,82 +3,148 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta
-      name="description"
-      content="브라우저에서 즐기는 2인용 네온 풋살 게임"
-    />
-    <title>NEON FUTSAL x4</title>
+    <meta name="description" content="브라우저에서 즐기는 1대1부터 4대4 온라인 네온 풋살" />
+    <title>NEON FUTSAL ONLINE</title>
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
     <main class="app">
       <header class="topbar">
         <div>
-          <p class="eyebrow">LOCAL MULTIPLAYER</p>
-          <h1>NEON FUTSAL <span>x4</span></h1>
+          <p class="eyebrow"><span id="connectionDot" class="connection-dot"></span> ONLINE MULTIPLAYER</p>
+          <h1>NEON FUTSAL <span>ONLINE</span></h1>
         </div>
-        <button id="soundButton" class="icon-button" type="button" aria-label="소리 켜기">
-          SOUND OFF
-        </button>
+        <div class="header-actions">
+          <button id="leaveButton" class="icon-button hidden" type="button">방 나가기</button>
+          <button id="soundButton" class="icon-button" type="button" aria-label="소리 켜기">SOUND OFF</button>
+        </div>
       </header>
 
-      <section class="scoreboard" aria-label="경기 현황">
-        <div class="team team-blue">
-          <span class="team-dot"></span>
-          <strong>BLUE</strong>
+      <section id="lobbyView" class="lobby-view">
+        <div class="lobby-intro">
+          <div>
+            <p class="eyebrow">MATCHMAKING TERMINAL // 02</p>
+            <h2>방을 고르고<br /><em>킥오프하세요.</em></h2>
+          </div>
+          <label class="nickname-field">
+            <span>내 닉네임</span>
+            <input id="nicknameInput" type="text" maxlength="16" autocomplete="nickname" placeholder="PLAYER" />
+          </label>
         </div>
-        <div class="score">
-          <strong id="blueScore">0</strong>
-          <span>:</span>
-          <strong id="redScore">0</strong>
-        </div>
-        <div class="team team-red">
-          <strong>RED</strong>
-          <span class="team-dot"></span>
-        </div>
-        <div id="timer" class="timer">02:00</div>
-      </section>
 
-      <section class="game-shell">
-        <canvas id="gameCanvas" width="1280" height="720" aria-label="풋살 게임"></canvas>
-
-        <div id="startOverlay" class="overlay">
-          <div class="overlay-card">
-            <p class="eyebrow">FUTSAL LAB // 01</p>
-            <h2>친구를 불러오세요.</h2>
-            <p class="lead">한 키보드로 붙는 빠르고 정신없는 네온 풋살.</p>
-
-            <div class="controls">
-              <div class="control-card blue-card">
-                <span>PLAYER 1</span>
-                <strong>W A S D</strong>
-                <small>이동 · SPACE 킥</small>
+        <div class="lobby-grid">
+          <section class="rooms-panel">
+            <div class="panel-heading">
+              <div>
+                <span class="step">01</span>
+                <h3>공개 방 목록</h3>
               </div>
-              <div class="versus">VS</div>
-              <div class="control-card red-card">
-                <span>PLAYER 2</span>
-                <strong>↑ ← ↓ →</strong>
-                <small>이동 · ENTER 킥</small>
+              <button id="refreshButton" class="refresh-button" type="button">새로고침 ↻</button>
+            </div>
+            <div id="roomList" class="room-list" aria-live="polite">
+              <div class="room-empty">서버에서 방 목록을 불러오는 중입니다.</div>
+            </div>
+          </section>
+
+          <form id="createRoomForm" class="create-panel">
+            <div class="panel-heading">
+              <div>
+                <span class="step">02</span>
+                <h3>새 경기 만들기</h3>
               </div>
             </div>
 
-            <button id="startButton" class="primary-button" type="button">
-              KICK OFF
-              <span>↗</span>
-            </button>
-          </div>
-        </div>
+            <label class="form-field">
+              <span>방 이름</span>
+              <input id="roomNameInput" type="text" maxlength="24" value="빠른 경기" required />
+            </label>
 
-        <div id="message" class="game-message" aria-live="polite"></div>
+            <label class="form-field">
+              <span>경기 시간</span>
+              <select id="durationSelect">
+                <option value="1">1분</option>
+                <option value="2" selected>2분</option>
+                <option value="3">3분</option>
+                <option value="4">4분</option>
+                <option value="5">5분</option>
+                <option value="6">6분</option>
+                <option value="7">7분</option>
+                <option value="8">8분</option>
+                <option value="9">9분</option>
+                <option value="10">10분</option>
+              </select>
+            </label>
+
+            <fieldset class="team-size-field">
+              <legend>경기 인원</legend>
+              <div class="size-options">
+                <label><input type="radio" name="teamSize" value="1" checked /><span>1 v 1</span></label>
+                <label><input type="radio" name="teamSize" value="2" /><span>2 v 2</span></label>
+                <label><input type="radio" name="teamSize" value="3" /><span>3 v 3</span></label>
+                <label><input type="radio" name="teamSize" value="4" /><span>4 v 4</span></label>
+              </div>
+            </fieldset>
+
+            <button id="createRoomButton" class="primary-button" type="submit">
+              방 만들기 <span>↗</span>
+            </button>
+            <p class="create-note">선택한 인원이 모두 접속하면 3초 뒤 자동으로 시작합니다.</p>
+          </form>
+        </div>
       </section>
 
-      <footer>
-        <p><kbd>R</kbd> 재시작</p>
-        <p>먼저 5골 또는 제한시간 종료 시 승리</p>
-        <p>NEON FUTSAL // BUILD 01</p>
-      </footer>
+      <section id="gameView" class="game-view hidden">
+        <section class="scoreboard" aria-label="경기 현황">
+          <div class="team team-blue">
+            <span class="team-dot"></span>
+            <strong>BLUE</strong>
+          </div>
+          <div class="score-center">
+            <div id="timer" class="timer">02:00</div>
+            <div class="score">
+              <strong id="blueScore">0</strong>
+              <span>:</span>
+              <strong id="redScore">0</strong>
+            </div>
+          </div>
+          <div class="team team-red">
+            <strong>RED</strong>
+            <span class="team-dot"></span>
+          </div>
+        </section>
+
+        <section class="game-shell">
+          <canvas id="gameCanvas" width="1280" height="720" aria-label="온라인 풋살 게임"></canvas>
+
+          <div id="waitingOverlay" class="overlay">
+            <div class="overlay-card waiting-card">
+              <p class="eyebrow" id="roomModeLabel">ONLINE ROOM</p>
+              <h2 id="waitingTitle">선수를 기다리는 중</h2>
+              <p id="waitingDescription" class="lead">접속 중...</p>
+              <div id="roster" class="roster"></div>
+              <div class="control-card online-control">
+                <span>내 조작</span>
+                <strong>방향키</strong>
+                <small>이동 · X / CTRL / SPACE 슛</small>
+              </div>
+            </div>
+          </div>
+
+          <div id="message" class="game-message" aria-live="polite"></div>
+          <div id="networkBadge" class="network-badge">PING -- ms</div>
+        </section>
+
+        <div class="game-footer">
+          <p><kbd>↑</kbd><kbd>←</kbd><kbd>↓</kbd><kbd>→</kbd> 이동</p>
+          <p><kbd>X</kbd> <kbd>CTRL</kbd> <kbd>SPACE</kbd> 슛</p>
+          <p>동점 종료 시 GOLDEN GOAL</p>
+        </div>
+      </section>
+
+      <div id="toast" class="toast" role="status"></div>
     </main>
 
-    <script src="./game.js"></script>
+    <script src="./config.js"></script>
+    <script type="module" src="./game.js"></script>
   </body>
 </html>
