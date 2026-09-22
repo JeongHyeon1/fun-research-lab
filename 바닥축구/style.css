@@ -517,15 +517,26 @@ select:focus {
 }
 
 .refresh-button {
-  border: 0;
-  background: transparent;
-  color: var(--muted);
+  border: 1px solid #465159;
+  border-radius: 2px;
+  padding: 9px 12px;
+  background: #11161a;
+  color: #b4c0c5;
   cursor: pointer;
   font: 700 9px "Space Mono", monospace;
+  transition: 150ms ease;
 }
 
 .refresh-button:hover {
+  border-color: var(--acid);
   color: var(--acid);
+}
+
+.refresh-button.loading,
+.refresh-button:disabled {
+  border-color: #30383e;
+  color: #626d73;
+  cursor: wait;
 }
 
 .room-list {

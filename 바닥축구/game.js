@@ -73,7 +73,12 @@ function savePlayerNumber(showError = false) {
 }
 
 async function loadRooms(showLoading = false) {
-  if (showLoading) roomList.innerHTML = '<div class="room-empty">방 목록을 불러오는 중입니다.</div>';
+  if (showLoading) {
+    roomList.innerHTML = '<div class="room-empty">방 목록을 새로 불러오는 중입니다.</div>';
+    refreshButton.disabled = true;
+    refreshButton.classList.add("loading");
+    refreshButton.textContent = "불러오는 중…";
+  }
   try {
     const response = await fetch(`${API_BASE}/api/rooms`, { cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -85,6 +90,12 @@ async function loadRooms(showLoading = false) {
     roomList.innerHTML =
       '<div class="room-empty">온라인 서버에 연결할 수 없습니다.<br />잠시 뒤 새로고침해주세요.</div>';
     if (showLoading) showToast(`서버 연결 실패: ${error.message}`);
+  } finally {
+    if (showLoading) {
+      refreshButton.disabled = false;
+      refreshButton.classList.remove("loading");
+      refreshButton.textContent = "↻ 방 목록 새로고침";
+    }
   }
 }
 
@@ -431,7 +442,11 @@ function smoothRenderedState(dt) {
   renderedState.status = target.status;
   renderedState.goldenGoal = target.goldenGoal;
   renderedState.scores = target.scores;
-  const snapshotAge = Math.min(0.1, (performance.now() - latestSnapshot.receivedAt) / 1000);
+  const oneWayLatency = Math.min(0.12, Math.max(0, roundTripMs || 0) / 2000);
+  const snapshotAge = Math.min(
+    0.16,
+    oneWayLatency + (performance.now() - latestSnapshot.receivedAt) / 1000,
+  );
   renderedState.players = target.players.map((player) => {
     const current = renderedState.players.find((entry) => entry.id === player.id) || player;
     const isLocal = player.id === playerId;
@@ -470,7 +485,8 @@ function smoothRenderedState(dt) {
     const serverX = player.x + player.vx * snapshotAge;
     const serverY = player.y + player.vy * snapshotAge;
     const error = Math.hypot(serverX - predictedX, serverY - predictedY);
-    const correction = 1 - Math.exp(-(isLocal ? (error > 80 ? 16 : 4.5) : 12) * dt);
+    const localCorrectionRate = error > 120 ? 18 : error > 55 ? 6 : 1.8;
+    const correction = 1 - Math.exp(-(isLocal ? localCorrectionRate : 10) * dt);
     return {
       ...player,
       x: clamp(
@@ -628,19 +644,28 @@ function drawGoal(x, direction, color, active) {
   const back = x + WORLD.goal.depth * direction;
   const remaining = latestSnapshot?.state.goalPauseSeconds ?? 0;
   const pulse = active ? clamp(remaining / 1.65, 0, 1) : 0;
-  const ripple = Math.sin(performance.now() * 0.025) * 8 * pulse;
+  const ripple = active ? Math.sin(performance.now() * 0.035) * (8 + 16 * pulse) : 0;
+  const impactY = active && renderedState?.ball ? renderedState.ball.y : WORLD.height / 2;
   ctx.save();
   ctx.strokeStyle = active ? color : "rgba(230,241,242,0.32)";
   ctx.fillStyle = active ? `${color}20` : "rgba(255,255,255,0.025)";
-  ctx.lineWidth = 2;
+  ctx.lineWidth = active ? 3 : 2;
+  ctx.shadowColor = active ? color : "transparent";
+  ctx.shadowBlur = active ? 18 * pulse : 0;
   ctx.fillRect(Math.min(x, back), WORLD.goal.top, WORLD.goal.depth, WORLD.goal.bottom - WORLD.goal.top);
   ctx.strokeRect(Math.min(x, back), WORLD.goal.top, WORLD.goal.depth, WORLD.goal.bottom - WORLD.goal.top);
   ctx.strokeStyle = active ? `${color}88` : "rgba(220,230,232,0.1)";
-  ctx.lineWidth = 1;
+  ctx.lineWidth = active ? 1.8 : 1;
   for (let y = WORLD.goal.top + 18; y < WORLD.goal.bottom; y += 18) {
+    const impactFalloff = 1 - Math.min(1, Math.abs(y - impactY) / (WORLD.goal.bottom - WORLD.goal.top));
     ctx.beginPath();
     ctx.moveTo(Math.min(x, back), y);
-    ctx.quadraticCurveTo(x + direction * WORLD.goal.depth * 0.55, y + ripple, Math.max(x, back), y);
+    ctx.quadraticCurveTo(
+      x + direction * WORLD.goal.depth * (0.55 + 0.18 * pulse),
+      y + ripple * (0.45 + impactFalloff * 0.75),
+      Math.max(x, back),
+      y,
+    );
     ctx.stroke();
   }
   for (let offset = 12; offset < WORLD.goal.depth; offset += 12) {
