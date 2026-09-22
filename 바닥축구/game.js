@@ -53,6 +53,7 @@ let lastFrameAt = performance.now();
 let lastPingAt = 0;
 let roundTripMs = null;
 let localKickArmed = false;
+let localBallPredictionUntil = 0;
 
 nicknameInput.value = localStorage.getItem("futsal-nickname") || `PLAYER-${Math.floor(1000 + Math.random() * 9000)}`;
 playerNumberInput.value = localStorage.getItem("futsal-player-number") || "10";
@@ -360,6 +361,8 @@ function returnToLobby() {
   renderedState = null;
   previousScores = { blue: 0, red: 0 };
   previousStatus = "waiting";
+  localBallPredictionUntil = 0;
+  localKickArmed = false;
   keys.clear();
   lobbyView.classList.remove("hidden");
   gameView.classList.add("hidden");
@@ -508,19 +511,39 @@ function smoothRenderedState(dt) {
     };
   });
   const currentBall = renderedState.ball;
-  const predictedBallX = currentBall.x + (currentBall.vx || 0) * dt;
-  const predictedBallY = currentBall.y + (currentBall.vy || 0) * dt;
-  const serverBallX = target.ball.x + target.ball.vx * snapshotAge;
-  const serverBallY = target.ball.y + target.ball.vy * snapshotAge;
-  const ballCorrection = 1 - Math.exp(-14 * dt);
-  const ballVelocityBlend = 1 - Math.exp(-20 * dt);
-  renderedState.ball = {
-    ...target.ball,
-    x: lerp(predictedBallX, serverBallX, ballCorrection),
-    y: lerp(predictedBallY, serverBallY, ballCorrection),
-    vx: lerp(currentBall.vx || 0, target.ball.vx, ballVelocityBlend),
-    vy: lerp(currentBall.vy || 0, target.ball.vy, ballVelocityBlend),
-  };
+  const serverLocalPlayer = target.players.find((player) => player.id === playerId);
+  const serverConfirmedKick =
+    localBallPredictionUntil > performance.now() &&
+    serverLocalPlayer?.kickFlash > 0 &&
+    Math.hypot(target.ball.vx, target.ball.vy) > 120;
+
+  if (localBallPredictionUntil > performance.now() && !serverConfirmedKick) {
+    const drag = Math.pow(0.36, dt);
+    renderedState.ball = {
+      ...currentBall,
+      x: currentBall.x + (currentBall.vx || 0) * dt,
+      y: currentBall.y + (currentBall.vy || 0) * dt,
+      vx: (currentBall.vx || 0) * drag,
+      vy: (currentBall.vy || 0) * drag,
+    };
+  } else {
+    if (serverConfirmedKick) localBallPredictionUntil = 0;
+    const predictedBallX = currentBall.x + (currentBall.vx || 0) * dt;
+    const predictedBallY = currentBall.y + (currentBall.vy || 0) * dt;
+    const serverBallX = target.ball.x + target.ball.vx * snapshotAge;
+    const serverBallY = target.ball.y + target.ball.vy * snapshotAge;
+    const ballError = Math.hypot(serverBallX - predictedBallX, serverBallY - predictedBallY);
+    const ballCorrectionRate = ballError > 90 ? 22 : 10;
+    const ballCorrection = 1 - Math.exp(-ballCorrectionRate * dt);
+    const ballVelocityBlend = 1 - Math.exp(-18 * dt);
+    renderedState.ball = {
+      ...target.ball,
+      x: lerp(predictedBallX, serverBallX, ballCorrection),
+      y: lerp(predictedBallY, serverBallY, ballCorrection),
+      vx: lerp(currentBall.vx || 0, target.ball.vx, ballVelocityBlend),
+      vy: lerp(currentBall.vy || 0, target.ball.vy, ballVelocityBlend),
+    };
+  }
   constrainRenderedBall(renderedState.ball, renderedState);
   if (localKickArmed && isKickHeld() && predictLocalKick(255)) localKickArmed = false;
 
@@ -560,6 +583,7 @@ function predictLocalKick(power = 565) {
   const length = Math.hypot(aimX, aimY) || 1;
   ball.vx = (aimX / length) * power + player.vx * 0.18;
   ball.vy = (aimY / length) * power + player.vy * 0.18;
+  localBallPredictionUntil = performance.now() + 350;
   player.kickFlash = 0.16;
   playTone(105, 0.07, "triangle", 0.04);
   return true;
