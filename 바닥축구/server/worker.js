@@ -56,6 +56,7 @@ export default {
         const headers = new Headers(request.headers);
         headers.set("x-room-id", roomId);
         headers.set("x-player-name", sanitizeText(url.searchParams.get("name"), 16, "PLAYER"));
+        headers.set("x-player-number", sanitizePlayerNumber(url.searchParams.get("number")));
         headers.set("x-reconnect-token", sanitizeToken(url.searchParams.get("token")));
         return room.fetch(new Request("https://room/socket", { headers }));
       }
@@ -201,6 +202,7 @@ export class GameRoom {
     }
 
     const name = sanitizeText(request.headers.get("x-player-name"), 16, "PLAYER");
+    const number = sanitizePlayerNumber(request.headers.get("x-player-number"));
     const requestedToken = sanitizeToken(request.headers.get("x-reconnect-token"));
     let player = null;
     let token = requestedToken;
@@ -216,7 +218,7 @@ export class GameRoom {
       }
       const playerId = crypto.randomUUID();
       token = crypto.randomUUID();
-      player = addMatchPlayer(this.match, { id: playerId, name });
+      player = addMatchPlayer(this.match, { id: playerId, name, number });
       if (!player) return json({ error: "빈 자리가 없습니다." }, 409);
       this.tokenPlayers.set(token, playerId);
     } else {
@@ -454,6 +456,13 @@ function sanitizeText(value, maximum, fallback) {
 function sanitizeToken(value) {
   const token = String(value ?? "");
   return /^[a-f0-9-]{20,64}$/i.test(token) ? token : "";
+}
+
+function sanitizePlayerNumber(value) {
+  const safe = String(value ?? "").trim().toUpperCase();
+  if (/^[가-힣]$/.test(safe)) return safe;
+  if (/^[A-Z0-9]{1,2}$/.test(safe)) return safe;
+  return "10";
 }
 
 function clampInt(value, minimum, maximum, fallback) {

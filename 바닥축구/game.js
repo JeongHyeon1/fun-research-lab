@@ -9,6 +9,7 @@ const roomList = $("#roomList");
 const createRoomForm = $("#createRoomForm");
 const createRoomButton = $("#createRoomButton");
 const nicknameInput = $("#nicknameInput");
+const playerNumberInput = $("#playerNumberInput");
 const roomNameInput = $("#roomNameInput");
 const durationSelect = $("#durationSelect");
 const refreshButton = $("#refreshButton");
@@ -53,12 +54,22 @@ let lastPingAt = 0;
 let roundTripMs = null;
 
 nicknameInput.value = localStorage.getItem("futsal-nickname") || `PLAYER-${Math.floor(1000 + Math.random() * 9000)}`;
+playerNumberInput.value = localStorage.getItem("futsal-player-number") || "10";
 
 function saveNickname() {
   const nickname = sanitizeText(nicknameInput.value, 16, "PLAYER");
   nicknameInput.value = nickname;
   localStorage.setItem("futsal-nickname", nickname);
   return nickname;
+}
+
+function savePlayerNumber(showError = false) {
+  const raw = playerNumberInput.value.trim().toUpperCase();
+  const number = sanitizePlayerNumber(raw);
+  if (showError && raw !== number) showToast("등번호는 한글 1자 또는 영문·숫자 2자까지 가능합니다.");
+  playerNumberInput.value = number;
+  localStorage.setItem("futsal-player-number", number);
+  return number;
 }
 
 async function loadRooms(showLoading = false) {
@@ -149,12 +160,13 @@ function joinRoom(room, reconnect = false) {
   activeRoom = room;
   manualClose = false;
   const nickname = saveNickname();
+  const number = savePlayerNumber();
   const tokenKey = `futsal-token:${room.id}`;
   const token = reconnect ? sessionStorage.getItem(tokenKey) || "" : "";
   const websocketBase = API_BASE.replace(/^http:/, "ws:").replace(/^https:/, "wss:");
   const url =
     `${websocketBase}/api/rooms/${encodeURIComponent(room.id)}/socket` +
-    `?name=${encodeURIComponent(nickname)}&token=${encodeURIComponent(token)}`;
+    `?name=${encodeURIComponent(nickname)}&number=${encodeURIComponent(number)}&token=${encodeURIComponent(token)}`;
   socket = new WebSocket(url);
 
   showGameView();
@@ -235,12 +247,13 @@ function applySnapshot(state, serverTime, immediate = false) {
     playTone(130, 0.35, "sawtooth", 0.025);
   }
 
+  const statusBeforeUpdate = previousStatus;
   previousScores = { ...state.scores };
   previousStatus = state.status;
-  updateMatchUi(state);
+  updateMatchUi(state, statusBeforeUpdate);
 }
 
-function updateMatchUi(state) {
+function updateMatchUi(state, previousMatchStatus = previousStatus) {
   blueScoreElement.textContent = state.scores.blue;
   redScoreElement.textContent = state.scores.red;
   updateTimer(state);
@@ -255,10 +268,15 @@ function updateMatchUi(state) {
     waitingTitle.textContent = "선수를 기다리는 중";
     waitingDescription.textContent = `${connected}/${capacity}명 접속 · 모두 모이면 자동으로 시작합니다.`;
   } else if (state.status === "countdown") {
-    waitingOverlay.classList.remove("hidden");
-    const count = Math.max(1, Math.ceil(state.countdownSeconds));
-    waitingTitle.textContent = count === 1 ? "KICK OFF!" : `${count}`;
-    waitingDescription.textContent = "곧 경기가 시작됩니다.";
+    if (state.countdownReason === "restart") {
+      waitingOverlay.classList.add("hidden");
+      if (previousMatchStatus === "goal") showMessage("KICK OFF!", 550);
+    } else {
+      waitingOverlay.classList.remove("hidden");
+      const count = Math.max(1, Math.ceil(state.countdownSeconds));
+      waitingTitle.textContent = count === 1 ? "KICK OFF!" : `${count}`;
+      waitingDescription.textContent = "곧 경기가 시작됩니다.";
+    }
   } else if (state.status === "ended") {
     waitingOverlay.classList.remove("hidden");
     waitingTitle.textContent = `${state.winner?.toUpperCase() || ""} WINS`;
@@ -296,7 +314,7 @@ function renderRoster(state) {
       const line = document.createElement("div");
       line.className = `roster-player ${player?.id === playerId ? "me" : ""}`;
       const name = document.createElement("span");
-      name.textContent = player ? player.name : "빈 자리";
+      name.textContent = player ? `[${player.number}] ${player.name}` : "빈 자리";
       const status = document.createElement("small");
       status.textContent = player ? (player.connected ? "READY" : "RECONNECT") : "WAIT";
       line.append(name, status);
@@ -416,18 +434,60 @@ function smoothRenderedState(dt) {
   const snapshotAge = Math.min(0.1, (performance.now() - latestSnapshot.receivedAt) / 1000);
   renderedState.players = target.players.map((player) => {
     const current = renderedState.players.find((entry) => entry.id === player.id) || player;
-    const predictedX = current.x + current.vx * dt;
-    const predictedY = current.y + current.vy * dt;
+    const isLocal = player.id === playerId;
+    let renderVx = current.vx;
+    let renderVy = current.vy;
+    let facingX = player.facingX;
+    let facingY = player.facingY;
+
+    if (isLocal) {
+      const input = getLocalInputVector();
+      if (input.length > 0) {
+        renderVx += input.x * 1500 * dt;
+        renderVy += input.y * 1500 * dt;
+        facingX = input.x;
+        facingY = input.y;
+      }
+      const drag = Math.pow(input.length > 0 ? 0.0008 : 0.00002, dt);
+      renderVx *= drag;
+      renderVy *= drag;
+      const speed = Math.hypot(renderVx, renderVy);
+      if (speed > 330) {
+        renderVx = (renderVx / speed) * 330;
+        renderVy = (renderVy / speed) * 330;
+      }
+      const velocityCorrection = 1 - Math.exp(-3.5 * dt);
+      renderVx = lerp(renderVx, player.vx, velocityCorrection);
+      renderVy = lerp(renderVy, player.vy, velocityCorrection);
+    } else {
+      const velocityBlend = 1 - Math.exp(-18 * dt);
+      renderVx = lerp(current.vx, player.vx, velocityBlend);
+      renderVy = lerp(current.vy, player.vy, velocityBlend);
+    }
+
+    const predictedX = current.x + renderVx * dt;
+    const predictedY = current.y + renderVy * dt;
     const serverX = player.x + player.vx * snapshotAge;
     const serverY = player.y + player.vy * snapshotAge;
-    const correction = 1 - Math.exp(-(player.id === playerId ? 9 : 12) * dt);
-    const velocityBlend = 1 - Math.exp(-18 * dt);
+    const error = Math.hypot(serverX - predictedX, serverY - predictedY);
+    const correction = 1 - Math.exp(-(isLocal ? (error > 80 ? 16 : 4.5) : 12) * dt);
     return {
       ...player,
-      x: lerp(predictedX, serverX, correction),
-      y: lerp(predictedY, serverY, correction),
-      vx: lerp(current.vx, player.vx, velocityBlend),
-      vy: lerp(current.vy, player.vy, velocityBlend),
+      x: clamp(
+        lerp(predictedX, serverX, correction),
+        WORLD.field.left - WORLD.playerLineMargin,
+        WORLD.field.right + WORLD.playerLineMargin,
+      ),
+      y: clamp(
+        lerp(predictedY, serverY, correction),
+        WORLD.field.top - WORLD.playerLineMargin,
+        WORLD.field.bottom + WORLD.playerLineMargin,
+      ),
+      vx: renderVx,
+      vy: renderVy,
+      facingX,
+      facingY,
+      kickFlash: isLocal ? Math.max(player.kickFlash, (current.kickFlash || 0) - dt) : player.kickFlash,
     };
   });
   const currentBall = renderedState.ball;
@@ -452,6 +512,37 @@ function smoothRenderedState(dt) {
   } else if (ballTrail.length) {
     ballTrail.pop();
   }
+}
+
+function getLocalInputVector() {
+  let x = Number(keys.has("ArrowRight")) - Number(keys.has("ArrowLeft"));
+  let y = Number(keys.has("ArrowDown")) - Number(keys.has("ArrowUp"));
+  const length = Math.hypot(x, y);
+  if (length > 0) {
+    x /= length;
+    y /= length;
+  }
+  return { x, y, length };
+}
+
+function predictLocalKick() {
+  if (!renderedState || !playerId) return;
+  const player = renderedState.players.find((entry) => entry.id === playerId);
+  const ball = renderedState.ball;
+  if (!player || !ball) return;
+  const dx = ball.x - player.x;
+  const dy = ball.y - player.y;
+  const distance = Math.hypot(dx, dy);
+  if (distance > player.radius + ball.radius + 22) return;
+  const nx = distance > 0.001 ? dx / distance : player.facingX;
+  const ny = distance > 0.001 ? dy / distance : player.facingY;
+  const aimX = nx * 0.58 + player.facingX * 0.42;
+  const aimY = ny * 0.58 + player.facingY * 0.42;
+  const length = Math.hypot(aimX, aimY) || 1;
+  ball.vx = (aimX / length) * 565 + player.vx * 0.18;
+  ball.vy = (aimY / length) * 565 + player.vy * 0.18;
+  player.kickFlash = 0.16;
+  playTone(105, 0.07, "triangle", 0.04);
 }
 
 function draw() {
@@ -528,24 +619,39 @@ function drawPenaltyArea(x, direction) {
 }
 
 function drawGoals() {
-  drawGoal(WORLD.field.left, -1, "#ff416d");
-  drawGoal(WORLD.field.right, 1, "#24c8ff");
+  const activeSide = renderedState?.status === "goal" ? renderedState.lastGoalSide : null;
+  drawGoal(WORLD.field.left, -1, "#ff416d", activeSide === "left");
+  drawGoal(WORLD.field.right, 1, "#24c8ff", activeSide === "right");
 }
 
-function drawGoal(x, direction, color) {
+function drawGoal(x, direction, color, active) {
   const back = x + WORLD.goal.depth * direction;
+  const remaining = latestSnapshot?.state.goalPauseSeconds ?? 0;
+  const pulse = active ? clamp(remaining / 1.65, 0, 1) : 0;
+  const ripple = Math.sin(performance.now() * 0.025) * 8 * pulse;
   ctx.save();
-  ctx.strokeStyle = "rgba(230,241,242,0.32)";
-  ctx.fillStyle = "rgba(255,255,255,0.025)";
+  ctx.strokeStyle = active ? color : "rgba(230,241,242,0.32)";
+  ctx.fillStyle = active ? `${color}20` : "rgba(255,255,255,0.025)";
   ctx.lineWidth = 2;
   ctx.fillRect(Math.min(x, back), WORLD.goal.top, WORLD.goal.depth, WORLD.goal.bottom - WORLD.goal.top);
   ctx.strokeRect(Math.min(x, back), WORLD.goal.top, WORLD.goal.depth, WORLD.goal.bottom - WORLD.goal.top);
-  ctx.strokeStyle = "rgba(220,230,232,0.1)";
+  ctx.strokeStyle = active ? `${color}88` : "rgba(220,230,232,0.1)";
   ctx.lineWidth = 1;
   for (let y = WORLD.goal.top + 18; y < WORLD.goal.bottom; y += 18) {
     ctx.beginPath();
     ctx.moveTo(Math.min(x, back), y);
-    ctx.lineTo(Math.max(x, back), y);
+    ctx.quadraticCurveTo(x + direction * WORLD.goal.depth * 0.55, y + ripple, Math.max(x, back), y);
+    ctx.stroke();
+  }
+  for (let offset = 12; offset < WORLD.goal.depth; offset += 12) {
+    ctx.beginPath();
+    ctx.moveTo(x + offset * direction, WORLD.goal.top);
+    ctx.quadraticCurveTo(
+      x + offset * direction + ripple * direction,
+      WORLD.height / 2,
+      x + offset * direction,
+      WORLD.goal.bottom,
+    );
     ctx.stroke();
   }
   ctx.shadowColor = color;
@@ -568,13 +674,6 @@ function drawPlayer(player, isLocal) {
   ctx.beginPath();
   ctx.ellipse(3, 9, player.radius + 7, player.radius - 4, 0, 0, Math.PI * 2);
   ctx.fill();
-  if (isLocal) {
-    ctx.strokeStyle = "#d9ff43";
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.arc(0, 0, player.radius + 7, 0, Math.PI * 2);
-    ctx.stroke();
-  }
   ctx.shadowColor = color;
   ctx.shadowBlur = player.kickFlash > 0 ? 28 : 14;
   const gradient = ctx.createRadialGradient(-8, -10, 3, 0, 0, player.radius);
@@ -589,6 +688,11 @@ function drawPlayer(player, isLocal) {
   ctx.strokeStyle = "rgba(255,255,255,0.8)";
   ctx.lineWidth = 2;
   ctx.stroke();
+  ctx.fillStyle = "#071013";
+  ctx.font = `${String(player.number || "10").length > 1 ? 700 : 800} 13px Space Mono, monospace`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(player.number || "10", 0, 1);
   ctx.rotate(Math.atan2(player.facingY, player.facingX));
   ctx.fillStyle = "#f6ffff";
   ctx.beginPath();
@@ -734,6 +838,13 @@ function sanitizeText(value, maximum, fallback) {
   return safe || fallback;
 }
 
+function sanitizePlayerNumber(value) {
+  const safe = String(value ?? "").trim().toUpperCase();
+  if (/^[가-힣]$/.test(safe)) return safe;
+  if (/^[A-Z0-9]{1,2}$/.test(safe)) return safe;
+  return "10";
+}
+
 function cloneState(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -742,19 +853,32 @@ function lerp(from, to, amount) {
   return from + (to - from) * amount;
 }
 
+function clamp(value, minimum, maximum) {
+  return Math.max(minimum, Math.min(maximum, value));
+}
+
 window.addEventListener("keydown", (event) => {
   if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "KeyX", "ControlLeft", "ControlRight", "Space"].includes(event.code)) {
     event.preventDefault();
+    const wasPressed = keys.has(event.code);
     keys.add(event.code);
+    if (!wasPressed && ["KeyX", "ControlLeft", "ControlRight", "Space"].includes(event.code)) {
+      predictLocalKick();
+    }
+    sendInput();
   }
 });
-window.addEventListener("keyup", (event) => keys.delete(event.code));
+window.addEventListener("keyup", (event) => {
+  keys.delete(event.code);
+  sendInput();
+});
 window.addEventListener("blur", () => keys.clear());
 createRoomForm.addEventListener("submit", createRoom);
 refreshButton.addEventListener("click", () => loadRooms(true));
 leaveButton.addEventListener("click", leaveRoom);
 soundButton.addEventListener("click", toggleSound);
 nicknameInput.addEventListener("change", saveNickname);
+playerNumberInput.addEventListener("change", () => savePlayerNumber(true));
 
 loadRooms(true);
 roomPollTimer = setInterval(loadRooms, 2500);

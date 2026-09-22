@@ -4,6 +4,7 @@ import {
   WORLD,
   addMatchPlayer,
   createMatch,
+  serializeMatch,
   setPlayerInput,
   stepMatch,
 } from "../shared/physics.js";
@@ -24,6 +25,13 @@ test("match settings are restricted to supported ranges", () => {
   assert.equal(createMatch({ teamSize: 0, durationMinutes: 0 }).teamSize, 1);
   assert.equal(createMatch({ teamSize: 9, durationMinutes: 20 }).teamSize, 4);
   assert.equal(createMatch({ teamSize: 9, durationMinutes: 20 }).durationMinutes, 10);
+});
+
+test("player badge accepts one Korean character or two Latin characters", () => {
+  const state = createMatch({ teamSize: 2, durationMinutes: 2 });
+  assert.equal(addMatchPlayer(state, { id: "one", name: "ONE", number: "한" }).number, "한");
+  assert.equal(addMatchPlayer(state, { id: "two", name: "TWO", number: "ab" }).number, "AB");
+  assert.equal(addMatchPlayer(state, { id: "three", name: "THREE", number: "너무김" }).number, "10");
 });
 
 test("passive contact pushes the ball without a large bounce", () => {
@@ -142,4 +150,18 @@ test("a team leading at full time wins without golden goal", () => {
   assert.equal(state.status, "ended");
   assert.equal(state.winner, "blue");
   assert.equal(state.winReason, "regulation");
+});
+
+test("a normal goal exposes net animation state and uses a quiet restart countdown", () => {
+  const state = createPlayingMatch();
+  state.ball.x = WORLD.field.right + state.ball.radius;
+  state.ball.y = WORLD.height / 2;
+  stepMatch(state, 1 / 60);
+  const goalSnapshot = serializeMatch(state);
+  assert.equal(goalSnapshot.status, "goal");
+  assert.equal(goalSnapshot.lastGoalSide, "right");
+
+  stepFor(state, 1.67);
+  assert.equal(state.status, "countdown");
+  assert.equal(state.countdownReason, "restart");
 });

@@ -418,6 +418,7 @@ kbd {
 }
 
 .nickname-field,
+.number-field,
 .form-field {
   display: flex;
   flex-direction: column;
@@ -425,11 +426,30 @@ kbd {
 }
 
 .nickname-field span,
+.number-field span,
 .form-field span,
 .team-size-field legend {
   color: var(--muted);
   font: 700 9px "Space Mono", monospace;
   letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.identity-fields {
+  display: grid;
+  grid-template-columns: 1fr 92px;
+  gap: 9px;
+  align-items: start;
+}
+
+.number-field small {
+  color: #5f6b72;
+  font: 400 7px "Space Mono", monospace;
+  white-space: nowrap;
+}
+
+.number-field input {
+  text-align: center;
   text-transform: uppercase;
 }
 

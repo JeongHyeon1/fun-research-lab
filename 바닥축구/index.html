@@ -26,10 +26,17 @@
             <p class="eyebrow">MATCHMAKING TERMINAL // 02</p>
             <h2>방을 고르고<br /><em>킥오프하세요.</em></h2>
           </div>
-          <label class="nickname-field">
-            <span>내 닉네임</span>
-            <input id="nicknameInput" type="text" maxlength="16" autocomplete="nickname" placeholder="PLAYER" />
-          </label>
+          <div class="identity-fields">
+            <label class="nickname-field">
+              <span>내 닉네임</span>
+              <input id="nicknameInput" type="text" maxlength="16" autocomplete="nickname" placeholder="PLAYER" />
+            </label>
+            <label class="number-field">
+              <span>등번호</span>
+              <input id="playerNumberInput" type="text" maxlength="2" inputmode="text" value="10" aria-describedby="numberHelp" />
+              <small id="numberHelp">한글 1자 / 영문·숫자 2자</small>
+            </label>
+          </div>
         </div>
 
         <div class="lobby-grid">

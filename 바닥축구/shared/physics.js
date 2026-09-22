@@ -28,6 +28,7 @@ export function createMatch(config = {}) {
     durationMinutes,
     remainingSeconds: durationMinutes * 60,
     countdownSeconds: COUNTDOWN_SECONDS,
+    countdownReason: "initial",
     goalPauseSeconds: 0,
     pendingWinner: null,
     goldenGoal: false,
@@ -51,6 +52,7 @@ export function addMatchPlayer(state, player) {
   const nextPlayer = {
     id: player.id,
     name: sanitizeName(player.name),
+    number: sanitizeNumber(player.number),
     team,
     slot,
     connected: true,
@@ -115,6 +117,7 @@ export function startMatchCountdown(state) {
   if (!canStartMatch(state)) return false;
   state.status = "countdown";
   state.countdownSeconds = COUNTDOWN_SECONDS;
+  state.countdownReason = "initial";
   resetPositions(state);
   return true;
 }
@@ -139,7 +142,8 @@ export function stepMatch(state, dt) {
       } else {
         resetPositions(state);
         state.status = "countdown";
-        state.countdownSeconds = 1.5;
+        state.countdownSeconds = 0.65;
+        state.countdownReason = "restart";
       }
     }
     state.tick += 1;
@@ -187,15 +191,19 @@ export function serializeMatch(state) {
     durationMinutes: state.durationMinutes,
     remainingSeconds: state.remainingSeconds,
     countdownSeconds: state.countdownSeconds,
+    countdownReason: state.countdownReason,
     goalPauseSeconds: state.goalPauseSeconds,
     goldenGoal: state.goldenGoal,
     winner: state.winner,
     winReason: state.winReason,
+    lastGoalTeam: state.lastGoalTeam ?? null,
+    lastGoalSide: state.lastGoalSide ?? null,
     scores: state.scores,
     tick: state.tick,
     players: state.players.map((player) => ({
       id: player.id,
       name: player.name,
+      number: player.number,
       team: player.team,
       slot: player.slot,
       connected: player.connected,
@@ -588,6 +596,13 @@ function countTeam(players, team, connectedOnly = false) {
 function sanitizeName(value) {
   const safe = String(value ?? "PLAYER").replace(/[<>&"'`]/g, "").trim().slice(0, 16);
   return safe || "PLAYER";
+}
+
+function sanitizeNumber(value) {
+  const safe = String(value ?? "").trim().toUpperCase();
+  if (/^[가-힣]$/.test(safe)) return safe;
+  if (/^[A-Z0-9]{1,2}$/.test(safe)) return safe;
+  return "10";
 }
 
 function clamp(value, minimum, maximum) {
